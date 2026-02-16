@@ -118,13 +118,86 @@ const TERRAIN_COLORS: Record<TerrainType, string> = {
 type ControlMode = 'direction' | 'spin'
 let controlMode: ControlMode = (localStorage.getItem('sushi-bros-ctrl') as ControlMode) || 'direction'
 
+// ─── Level System ───
+interface LevelConfig {
+  name: string
+  subtitle: string
+  targetDistance: number
+  terrainFn: (worldY: number) => TerrainType
+  enemyWeights: [number, number, number] // crab, seagull, fisherman
+  bgColor: string
+}
+
+const LEVEL_CONFIGS: LevelConfig[] = [
+  {
+    name: 'Ocean Voyage',
+    subtitle: 'Navigate the treacherous waters!',
+    targetDistance: 2000,
+    terrainFn: (worldY: number) => {
+      const qd = Math.floor(worldY / 8) * 8
+      if (worldY < 1400) return 'water'
+      if (worldY < 1800) return hashY(qd) > (worldY - 1400) / 400 ? 'water' : 'sand'
+      return 'sand'
+    },
+    enemyWeights: [0.5, 0.4, 0.1],
+    bgColor: '#0a1a3a'
+  },
+  {
+    name: 'Beach Landing',
+    subtitle: 'Storm the sandy shores!',
+    targetDistance: 2500,
+    terrainFn: (worldY: number) => {
+      const qd = Math.floor(worldY / 8) * 8
+      if (worldY < 400) return 'water'
+      if (worldY < 800) return hashY(qd) > (worldY - 400) / 400 ? 'water' : 'sand'
+      if (worldY < 1800) return 'sand'
+      if (worldY < 2200) return hashY(qd) > (worldY - 1800) / 400 ? 'sand' : 'grass'
+      return 'grass'
+    },
+    enemyWeights: [0.4, 0.3, 0.3],
+    bgColor: '#1a1a0a'
+  },
+  {
+    name: 'Island Interior',
+    subtitle: 'Brave the dense jungle!',
+    targetDistance: 3000,
+    terrainFn: (worldY: number) => {
+      const qd = Math.floor(worldY / 8) * 8
+      if (worldY < 300) return 'sand'
+      if (worldY < 600) return hashY(qd) > (worldY - 300) / 300 ? 'sand' : 'grass'
+      return 'grass'
+    },
+    enemyWeights: [0.3, 0.3, 0.4],
+    bgColor: '#0a1a0a'
+  }
+]
+
+// ─── High Scores ───
+interface HighScoreEntry { score: number; level: number; date: string }
+
+function loadHighScores(): HighScoreEntry[] {
+  try {
+    return JSON.parse(localStorage.getItem('sushi-bros-scores') || '[]')
+  } catch { return [] }
+}
+
+function saveHighScore(s: number, lvl: number) {
+  const scores = loadHighScores()
+  scores.push({ score: s, level: lvl, date: new Date().toLocaleDateString() })
+  scores.sort((a, b) => b.score - a.score)
+  scores.length = Math.min(scores.length, 5)
+  localStorage.setItem('sushi-bros-scores', JSON.stringify(scores))
+  // Also update legacy highScore
+  if (s > highScore) { highScore = s; localStorage.setItem('sushi-bros-hi', String(highScore)) }
+}
+
 // ─── State ───
-type GameState = 'menu' | 'playing' | 'gameover'
+type GameState = 'menu' | 'playing' | 'gameover' | 'levelIntro' | 'levelComplete' | 'victory' | 'highscores' | 'controls'
 let state: GameState = 'menu'
 let score = 0
 let highScore = parseInt(localStorage.getItem('sushi-bros-hi') || '0')
 let lives = 3
-let scrollY = 0 // total scroll distance (increases)
+let scrollY = 0
 let player: Player
 let sushis: Sushi[] = []
 let enemies: Enemy[] = []
@@ -134,6 +207,10 @@ let poleSwing: PoleSwing | null = null
 let frameCount = 0
 let paused = false
 let distance = 0
+let currentLevel = 0 // 0-indexed
+let levelIntroTimer = 0
+let menuSelection = 0
+const MENU_ITEMS = ['Start Game', 'High Scores', 'Controls']
 
 // Terrain segments - each covers SEGMENT_H pixels of world height
 const SEGMENT_H = 200
@@ -151,22 +228,10 @@ function hashY(y: number): number {
 }
 
 function getTerrainAt(worldY: number): TerrainType {
-  // worldY increases upward (forward progress)
-  // Start on water, transition to sand then grass
-  const d = worldY
-  // Quantize to avoid per-pixel noise in transitions
-  const qd = Math.floor(d / 8) * 8
-  if (d < 800) return 'water'
-  if (d < 1200) return hashY(qd) > (d - 800) / 400 ? 'water' : 'sand'
-  if (d < 1600) return 'sand'
-  if (d < 2000) return hashY(qd) > (d - 1600) / 400 ? 'sand' : 'grass'
-  // After 2000: mostly grass with occasional sand/water patches
-  const cycle = (d % 3000)
-  if (cycle < 2000) return 'grass'
-  if (cycle < 2400) return 'sand'
-  if (cycle < 2600) return 'water'
-  if (cycle < 3000) return 'sand'
-  return 'grass'
+  const cfg = LEVEL_CONFIGS[currentLevel]
+  if (cfg) return cfg.terrainFn(worldY)
+  // Fallback
+  return 'water'
 }
 
 function getTerrainColor(worldY: number): string {
@@ -178,10 +243,20 @@ function getTerrainColor(worldY: number): string {
 const keys: Record<string, boolean> = {}
 addEventListener('keydown', e => {
   keys[e.code] = true
-  if (state === 'menu' && e.code === 'Tab') { e.preventDefault(); toggleControlMode() }
-  if (state === 'menu' && (e.code === 'Enter' || e.code === 'Space')) startGame()
-  if (state === 'gameover' && e.code === 'Enter') startGame()
+  if (state === 'menu') {
+    if (e.code === 'ArrowUp' || e.code === 'KeyW') { menuSelection = (menuSelection - 1 + MENU_ITEMS.length) % MENU_ITEMS.length }
+    if (e.code === 'ArrowDown' || e.code === 'KeyS') { menuSelection = (menuSelection + 1) % MENU_ITEMS.length }
+    if (e.code === 'Enter' || e.code === 'Space') { handleMenuSelect() }
+    if (e.code === 'Tab') { e.preventDefault(); toggleControlMode() }
+  }
+  if (state === 'highscores' || state === 'controls') {
+    if (e.code === 'Escape' || e.code === 'Enter') { state = 'menu' }
+  }
+  if (state === 'gameover' && e.code === 'Enter') startNewRun()
   if (state === 'gameover' && e.code === 'Escape') { state = 'menu' }
+  if (state === 'levelComplete' && e.code === 'Enter') advanceLevel()
+  if (state === 'victory' && e.code === 'Enter') startNewRun()
+  if (state === 'victory' && e.code === 'Escape') { state = 'menu' }
   if (state === 'playing' && (e.code === 'Escape' || e.code === 'KeyP')) { paused = !paused }
 })
 addEventListener('keyup', e => { keys[e.code] = false })
@@ -257,11 +332,18 @@ canvas.addEventListener('touchstart', e => {
     if (t0.clientX >= b.x && t0.clientX <= b.x + b.w && t0.clientY >= b.y && t0.clientY <= b.y + b.h) {
       toggleControlMode(); return
     }
-    startGame(); return
+    handleMenuClick(t0.clientX, t0.clientY); return
   }
+  if (state === 'highscores' || state === 'controls') { state = 'menu'; return }
   if (state === 'gameover') {
     const t0 = e.changedTouches[0]
     handleGameOverClick(t0.clientX, t0.clientY)
+    return
+  }
+  if (state === 'levelComplete') { advanceLevel(); return }
+  if (state === 'victory') {
+    const t0 = e.changedTouches[0]
+    handleVictoryClick(t0.clientX, t0.clientY)
     return
   }
   {
@@ -356,6 +438,8 @@ function pauseBtnBounds() {
 }
 
 canvas.addEventListener('click', e => {
+  if (state === 'menu') handleMenuClick(e.clientX, e.clientY)
+  if (state === 'highscores' || state === 'controls') { state = 'menu' }
   if (state === 'playing') {
     const pb = pauseBtnBounds()
     if (e.clientX >= pb.x && e.clientX <= pb.x + pb.w && e.clientY >= pb.y && e.clientY <= pb.y + pb.h) {
@@ -363,6 +447,8 @@ canvas.addEventListener('click', e => {
     }
   }
   if (state === 'gameover') handleGameOverClick(e.clientX, e.clientY)
+  if (state === 'levelComplete') advanceLevel()
+  if (state === 'victory') handleVictoryClick(e.clientX, e.clientY)
 })
 
 // ─── Actions ───
@@ -396,12 +482,56 @@ function activatePole() {
   }
 }
 
+// ─── Menu Logic ───
+let menuItemBounds: { x: number; y: number; w: number; h: number }[] = []
+
+function handleMenuSelect() {
+  if (menuSelection === 0) startNewRun()
+  else if (menuSelection === 1) state = 'highscores'
+  else if (menuSelection === 2) state = 'controls'
+}
+
+function handleMenuClick(cx: number, cy: number) {
+  for (let i = 0; i < menuItemBounds.length; i++) {
+    const b = menuItemBounds[i]
+    if (cx >= b.x && cx <= b.x + b.w && cy >= b.y && cy <= b.y + b.h) {
+      menuSelection = i; handleMenuSelect(); return
+    }
+  }
+}
+
 // ─── Game Init ───
-function startGame() {
+function startNewRun() {
   if (audioCtx.state === 'suspended') audioCtx.resume()
+  score = 0; lives = 3; currentLevel = 0
+  beginLevel(0)
+}
+
+function beginLevel(level: number) {
+  currentLevel = level
+  scrollY = 0; distance = 0
+  sushis = []; enemies = []; enemyProjectiles = []; particles = []
+  poleSwing = null
+  nextEnemyWorldY = 400
+  resetPlayer()
+  state = 'levelIntro'
+  levelIntroTimer = 120 // ~2 seconds at 60fps
+}
+
+function advanceLevel() {
+  if (currentLevel < LEVEL_CONFIGS.length - 1) {
+    beginLevel(currentLevel + 1)
+  } else {
+    saveHighScore(score, currentLevel + 1)
+    state = 'victory'
+  }
+}
+
+function startGame(level?: number) {
+  if (audioCtx.state === 'suspended') audioCtx.resume()
+  if (level !== undefined) currentLevel = level
   state = 'playing'
-  score = 0; lives = 3; distance = 0
-  scrollY = 0
+  scrollY = 0; distance = 0
   sushis = []; enemies = []; enemyProjectiles = []; particles = []
   poleSwing = null
   nextEnemyWorldY = 400
@@ -431,8 +561,13 @@ function spawnEnemiesAhead() {
     const count = 1 + Math.floor(Math.random() * 2)
     for (let c = 0; c < count; c++) {
       const types: EnemyType[] = ['crab', 'seagull', 'fisherman']
+      const lvlCfg = LEVEL_CONFIGS[currentLevel]
       const diff = Math.min(nextEnemyWorldY / 5000, 1)
-      const weights = [
+      const weights = lvlCfg ? [
+        lvlCfg.enemyWeights[0] + (1 - diff) * 0.2,
+        lvlCfg.enemyWeights[1] + diff * 0.2,
+        lvlCfg.enemyWeights[2] + diff * 0.3
+      ] : [
         1 - diff * 0.3,
         0.3 + diff * 0.4,
         diff * 0.5
@@ -487,8 +622,12 @@ function spawnParticles(x: number, y: number, count: number, colors: string[]) {
 function update() {
   frameCount++
 
-  if (state === 'menu') return
-  if (state === 'gameover') return
+  if (state === 'menu' || state === 'gameover' || state === 'highscores' || state === 'controls' || state === 'levelComplete' || state === 'victory') return
+  if (state === 'levelIntro') {
+    levelIntroTimer--
+    if (levelIntroTimer <= 0) state = 'playing'
+    return
+  }
   if (paused) return
 
   // Respawn logic
@@ -556,6 +695,19 @@ function update() {
     player.pos.y = scrollThreshold
   }
   distance = Math.floor(scrollY)
+
+  // Level completion check
+  const levelCfg = LEVEL_CONFIGS[currentLevel]
+  if (levelCfg && distance >= levelCfg.targetDistance) {
+    if (currentLevel >= LEVEL_CONFIGS.length - 1) {
+      saveHighScore(score, currentLevel + 1)
+      state = 'victory'
+      return
+    } else {
+      state = 'levelComplete'
+      return
+    }
+  }
 
   // Keyboard actions
   if (keys['Space']) { keys['Space'] = false; throwSushi() }
@@ -674,7 +826,7 @@ function playerDamage() {
   lives--
   if (lives <= 0) {
     state = 'gameover'
-    if (score > highScore) { highScore = score; localStorage.setItem('sushi-bros-hi', String(highScore)) }
+    saveHighScore(score, currentLevel + 1)
   } else {
     player.respawnTimer = 90
   }
@@ -1150,10 +1302,19 @@ function drawHUD() {
   ctx.textAlign = 'center'
   ctx.fillText(`${distance}m`, canvas.width / 2, 25)
 
-  // Terrain indicator
-  const terrain = getTerrainAt(scrollY + canvas.height / 2)
-  const terrainName = terrain === 'water' ? '🌊 OCEAN' : terrain === 'sand' ? '🏖 BEACH' : '🌴 ISLAND'
-  ctx.fillText(terrainName, canvas.width / 2, 42)
+  // Level + terrain indicator
+  const cfg = LEVEL_CONFIGS[currentLevel]
+  const levelLabel = cfg ? `Lv${currentLevel + 1}: ${cfg.name}` : ''
+  ctx.fillText(levelLabel, canvas.width / 2, 42)
+
+  // Progress bar toward level target
+  if (cfg) {
+    const prog = Math.min(distance / cfg.targetDistance, 1)
+    const barW = 100, barH = 4
+    const barX = canvas.width / 2 - barW / 2, barY = 48
+    ctx.fillStyle = 'rgba(255,255,255,0.15)'; ctx.fillRect(barX, barY, barW, barH)
+    ctx.fillStyle = 'rgba(68,255,68,0.6)'; ctx.fillRect(barX, barY, barW * prog, barH)
+  }
 
   // Pause button
   const pb = pauseBtnBounds()
@@ -1260,12 +1421,9 @@ function drawTouchControls() {
   }
 }
 
-function drawMenu() {
-  // Ocean background
+function drawMenuBackground() {
   ctx.fillStyle = '#0a1a3a'
   ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-  // Animated waves
   for (let y = 0; y < canvas.height; y += 30) {
     ctx.strokeStyle = `rgba(60,120,200,${0.1 + (y / canvas.height) * 0.15})`
     ctx.lineWidth = 1.5
@@ -1276,36 +1434,43 @@ function drawMenu() {
     }
     ctx.stroke()
   }
+}
 
-  // Draw a boat
-  drawBoat(canvas.width / 2, canvas.height * 0.55)
-
+function drawMenu() {
+  drawMenuBackground()
+  drawBoat(canvas.width / 2, canvas.height * 0.50)
   ctx.textAlign = 'center'
+  const cx = canvas.width / 2
 
-  // Title
   const titleSize = isPortrait ? 38 : 56
   ctx.fillStyle = '#ff7744'; ctx.font = `bold ${titleSize}px monospace`
-  ctx.fillText('🍣 SUSHI BROS 🎣', canvas.width / 2, canvas.height * 0.28)
+  ctx.fillText('🍣 SUSHI BROS 🎣', cx, canvas.height * 0.22)
 
-  // Subtitle
   ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = `${isPortrait ? 14 : 18}px monospace`
-  ctx.fillText('A Top-Down Fishing Adventure', canvas.width / 2, canvas.height * 0.35)
+  ctx.fillText('A Top-Down Fishing Adventure', cx, canvas.height * 0.29)
 
-  if (Math.floor(Date.now() / 500) % 2 === 0) {
-    ctx.fillStyle = '#cccccc'; ctx.font = `${isPortrait ? 18 : 22}px monospace`
-    ctx.fillText(isTouchDevice ? 'TAP TO START' : 'PRESS ENTER OR SPACE', canvas.width / 2, canvas.height * 0.44)
-  }
-
-  ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
-  if (isTouchDevice) {
-    ctx.fillText('D-PAD: MOVE    SUSHI: THROW    POLE: SWING', canvas.width / 2, canvas.height * 0.65)
-  } else {
-    ctx.fillText('WASD/ARROWS — MOVE    SPACE — SUSHI    SHIFT/Z — POLE', canvas.width / 2, canvas.height * 0.65)
+  // Menu items
+  const btnW = isPortrait ? 220 : 260, btnH = isPortrait ? 42 : 48, gap = 10
+  const startY = canvas.height * 0.38
+  menuItemBounds = []
+  for (let i = 0; i < MENU_ITEMS.length; i++) {
+    const y = startY + i * (btnH + gap)
+    const bx = cx - btnW / 2
+    menuItemBounds.push({ x: bx, y, w: btnW, h: btnH })
+    const selected = menuSelection === i
+    ctx.fillStyle = selected ? 'rgba(255,120,68,0.25)' : 'rgba(255,255,255,0.06)'
+    ctx.fillRect(bx, y, btnW, btnH)
+    ctx.strokeStyle = selected ? 'rgba(255,120,68,0.9)' : 'rgba(255,255,255,0.3)'
+    ctx.lineWidth = selected ? 2 : 1
+    ctx.strokeRect(bx, y, btnW, btnH)
+    ctx.fillStyle = selected ? '#ffffff' : 'rgba(255,255,255,0.7)'
+    ctx.font = `${selected ? 'bold ' : ''}${isPortrait ? 16 : 18}px monospace`
+    ctx.fillText(MENU_ITEMS[i], cx, y + btnH / 2 + 6)
   }
 
   if (highScore > 0) {
     ctx.fillStyle = 'rgba(255,200,100,0.6)'; ctx.font = `${isPortrait ? 14 : 16}px monospace`
-    ctx.fillText(`HIGH SCORE: ${highScore}`, canvas.width / 2, canvas.height * 0.72)
+    ctx.fillText(`HIGH SCORE: ${highScore}`, cx, canvas.height * 0.72)
   }
 
   // Control mode toggle
@@ -1315,11 +1480,185 @@ function drawMenu() {
   const toggleText = isTouchDevice ? `[ ${modeLabel} ]  TAP TO CHANGE` : `[ ${modeLabel} ]  TAB TO CHANGE`
   const toggleY = canvas.height * 0.80
   const tw = ctx.measureText(toggleText).width
-  ctrlToggleBounds = { x: canvas.width / 2 - tw / 2 - 10, y: toggleY - ctrlFont - 2, w: tw + 20, h: ctrlFont + 12 }
+  ctrlToggleBounds = { x: cx - tw / 2 - 10, y: toggleY - ctrlFont - 2, w: tw + 20, h: ctrlFont + 12 }
   ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1
   ctx.strokeRect(ctrlToggleBounds.x, ctrlToggleBounds.y, ctrlToggleBounds.w, ctrlToggleBounds.h)
   ctx.fillStyle = 'rgba(255,255,255,0.6)'
-  ctx.fillText(toggleText, canvas.width / 2, toggleY)
+  ctx.fillText(toggleText, cx, toggleY)
+
+  if (!isTouchDevice) {
+    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
+    ctx.fillText('↑↓ SELECT   ENTER TO CONFIRM', cx, canvas.height * 0.90)
+  }
+}
+
+function drawHighScores() {
+  drawMenuBackground()
+  ctx.textAlign = 'center'
+  const cx = canvas.width / 2
+  ctx.fillStyle = '#ffdd00'; ctx.font = `bold ${isPortrait ? 28 : 36}px monospace`
+  ctx.fillText('🏆 HIGH SCORES', cx, canvas.height * 0.18)
+
+  const scores = loadHighScores()
+  const fs = isPortrait ? 16 : 20
+  ctx.font = `${fs}px monospace`
+  if (scores.length === 0) {
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'
+    ctx.fillText('No scores yet!', cx, canvas.height * 0.4)
+  } else {
+    for (let i = 0; i < scores.length; i++) {
+      const s = scores[i]
+      const y = canvas.height * 0.30 + i * (fs + 16)
+      ctx.fillStyle = i === 0 ? '#ffdd00' : '#ffffff'
+      ctx.fillText(`${i + 1}. ${s.score}  (Lv${s.level})  ${s.date}`, cx, y)
+    }
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
+  ctx.fillText(isTouchDevice ? 'TAP TO GO BACK' : 'PRESS ESC OR ENTER', cx, canvas.height * 0.85)
+}
+
+function drawControlsScreen() {
+  drawMenuBackground()
+  ctx.textAlign = 'center'
+  const cx = canvas.width / 2
+  ctx.fillStyle = '#ff7744'; ctx.font = `bold ${isPortrait ? 28 : 36}px monospace`
+  ctx.fillText('CONTROLS', cx, canvas.height * 0.18)
+
+  const fs = isPortrait ? 14 : 16
+  ctx.font = `${fs}px monospace`; ctx.fillStyle = '#ffffff'
+  const lines = isTouchDevice ? [
+    'LEFT STICK — Move',
+    'RIGHT STICK — Aim & Throw Sushi',
+    'POLE Button — Swing Fishing Pole',
+  ] : [
+    'WASD / Arrow Keys — Move',
+    'SPACE — Throw Sushi',
+    'SHIFT / Z — Swing Fishing Pole',
+    'P / ESC — Pause',
+  ]
+  for (let i = 0; i < lines.length; i++) {
+    ctx.fillText(lines[i], cx, canvas.height * 0.35 + i * (fs + 12))
+  }
+  ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
+  ctx.fillText(isTouchDevice ? 'TAP TO GO BACK' : 'PRESS ESC OR ENTER', cx, canvas.height * 0.85)
+}
+
+function drawLevelIntro() {
+  const cfg = LEVEL_CONFIGS[currentLevel]
+  ctx.fillStyle = cfg.bgColor
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+  // Fade: in first half, fade in; second half, hold then fade out
+  const progress = 1 - levelIntroTimer / 120
+  let alpha: number
+  if (progress < 0.2) alpha = progress / 0.2
+  else if (progress > 0.8) alpha = (1 - progress) / 0.2
+  else alpha = 1
+
+  ctx.globalAlpha = alpha
+  ctx.textAlign = 'center'
+  const cx = canvas.width / 2
+
+  ctx.fillStyle = 'rgba(255,255,255,0.15)'
+  ctx.font = `bold ${isPortrait ? 60 : 80}px monospace`
+  ctx.fillText(`${currentLevel + 1}`, cx, canvas.height * 0.45)
+
+  ctx.fillStyle = '#ff7744'
+  ctx.font = `bold ${isPortrait ? 28 : 38}px monospace`
+  ctx.fillText(`Level ${currentLevel + 1}`, cx, canvas.height * 0.38)
+
+  ctx.fillStyle = '#ffffff'
+  ctx.font = `bold ${isPortrait ? 22 : 30}px monospace`
+  ctx.fillText(cfg.name, cx, canvas.height * 0.48)
+
+  ctx.fillStyle = 'rgba(255,255,255,0.6)'
+  ctx.font = `${isPortrait ? 14 : 18}px monospace`
+  ctx.fillText(cfg.subtitle, cx, canvas.height * 0.56)
+
+  ctx.globalAlpha = 1
+}
+
+function drawLevelComplete() {
+  ctx.fillStyle = 'rgba(0,0,0,0.75)'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.textAlign = 'center'
+  const cx = canvas.width / 2
+  const cfg = LEVEL_CONFIGS[currentLevel]
+
+  ctx.fillStyle = '#44ff44'; ctx.font = `bold ${isPortrait ? 32 : 44}px monospace`
+  ctx.fillText('LEVEL COMPLETE!', cx, canvas.height * 0.25)
+
+  ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 18 : 22}px monospace`
+  ctx.fillText(`${cfg.name}`, cx, canvas.height * 0.34)
+  ctx.fillText(`Score: ${score}`, cx, canvas.height * 0.42)
+  ctx.fillText(`Distance: ${distance}m`, cx, canvas.height * 0.49)
+
+  // Next level button
+  const btnW = isPortrait ? 220 : 260, btnH = isPortrait ? 48 : 54
+  const btnY = canvas.height * 0.58
+  ctx.fillStyle = 'rgba(68,255,68,0.2)'
+  ctx.fillRect(cx - btnW / 2, btnY, btnW, btnH)
+  ctx.strokeStyle = 'rgba(68,255,68,0.8)'; ctx.lineWidth = 2
+  ctx.strokeRect(cx - btnW / 2, btnY, btnW, btnH)
+  ctx.fillStyle = '#ffffff'; ctx.font = `bold ${isPortrait ? 18 : 20}px monospace`
+  ctx.fillText('NEXT LEVEL →', cx, btnY + btnH / 2 + 6)
+
+  if (!isTouchDevice) {
+    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
+    ctx.fillText('PRESS ENTER TO CONTINUE', cx, canvas.height * 0.80)
+  }
+}
+
+let victoryBtnPlay = { x: 0, y: 0, w: 0, h: 0 }
+let victoryBtnMenu = { x: 0, y: 0, w: 0, h: 0 }
+
+function handleVictoryClick(cx: number, cy: number) {
+  if (cx >= victoryBtnPlay.x && cx <= victoryBtnPlay.x + victoryBtnPlay.w &&
+      cy >= victoryBtnPlay.y && cy <= victoryBtnPlay.y + victoryBtnPlay.h) startNewRun()
+  else if (cx >= victoryBtnMenu.x && cx <= victoryBtnMenu.x + victoryBtnMenu.w &&
+           cy >= victoryBtnMenu.y && cy <= victoryBtnMenu.y + victoryBtnMenu.h) state = 'menu'
+}
+
+function drawVictory() {
+  drawMenuBackground()
+  ctx.textAlign = 'center'
+  const cx = canvas.width / 2
+
+  ctx.fillStyle = '#ffdd00'; ctx.font = `bold ${isPortrait ? 36 : 48}px monospace`
+  ctx.fillText('🎉 VICTORY! 🎉', cx, canvas.height * 0.22)
+
+  ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 18 : 24}px monospace`
+  ctx.fillText('Congratulations, Sushi Chef!', cx, canvas.height * 0.32)
+  ctx.fillText(`Total Score: ${score}`, cx, canvas.height * 0.40)
+
+  const btnW = isPortrait ? 200 : 240, btnH = isPortrait ? 44 : 50, gap = 14
+  const btnStartY = canvas.height * 0.50
+
+  victoryBtnPlay = { x: cx - btnW / 2, y: btnStartY, w: btnW, h: btnH }
+  ctx.fillStyle = 'rgba(255,120,68,0.2)'; ctx.fillRect(victoryBtnPlay.x, victoryBtnPlay.y, btnW, btnH)
+  ctx.strokeStyle = 'rgba(255,120,68,0.8)'; ctx.lineWidth = 2
+  ctx.strokeRect(victoryBtnPlay.x, victoryBtnPlay.y, btnW, btnH)
+  ctx.fillStyle = '#ffffff'; ctx.font = `bold ${isPortrait ? 16 : 18}px monospace`
+  ctx.fillText('PLAY AGAIN', cx, btnStartY + btnH / 2 + 6)
+
+  const menuBtnY = btnStartY + btnH + gap
+  victoryBtnMenu = { x: cx - btnW / 2, y: menuBtnY, w: btnW, h: btnH }
+  ctx.fillStyle = 'rgba(255,255,255,0.06)'; ctx.fillRect(victoryBtnMenu.x, victoryBtnMenu.y, btnW, btnH)
+  ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1.5
+  ctx.strokeRect(victoryBtnMenu.x, victoryBtnMenu.y, btnW, btnH)
+  ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = `${isPortrait ? 14 : 16}px monospace`
+  ctx.fillText('MAIN MENU', cx, menuBtnY + btnH / 2 + 5)
+
+  // Show high scores
+  const scores = loadHighScores()
+  if (scores.length > 0) {
+    ctx.fillStyle = 'rgba(255,200,100,0.6)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
+    const hsY = menuBtnY + btnH + 30
+    ctx.fillText('— HIGH SCORES —', cx, hsY)
+    for (let i = 0; i < Math.min(scores.length, 3); i++) {
+      ctx.fillText(`${i + 1}. ${scores[i].score}`, cx, hsY + 20 + i * 18)
+    }
+  }
 }
 
 // ─── Game Over ───
@@ -1328,7 +1667,7 @@ let gameOverBtnMenu = { x: 0, y: 0, w: 0, h: 0 }
 
 function handleGameOverClick(cx: number, cy: number) {
   if (cx >= gameOverBtnPlay.x && cx <= gameOverBtnPlay.x + gameOverBtnPlay.w &&
-      cy >= gameOverBtnPlay.y && cy <= gameOverBtnPlay.y + gameOverBtnPlay.h) startGame()
+      cy >= gameOverBtnPlay.y && cy <= gameOverBtnPlay.y + gameOverBtnPlay.h) startNewRun()
   else if (cx >= gameOverBtnMenu.x && cx <= gameOverBtnMenu.x + gameOverBtnMenu.w &&
            cy >= gameOverBtnMenu.y && cy <= gameOverBtnMenu.y + gameOverBtnMenu.h) state = 'menu'
 }
@@ -1384,6 +1723,18 @@ function drawGameOver() {
 function draw() {
   if (state === 'menu') {
     drawMenu()
+  } else if (state === 'highscores') {
+    drawHighScores()
+  } else if (state === 'controls') {
+    drawControlsScreen()
+  } else if (state === 'levelIntro') {
+    drawLevelIntro()
+  } else if (state === 'levelComplete') {
+    drawScrollingBackground()
+    drawParticles()
+    drawLevelComplete()
+  } else if (state === 'victory') {
+    drawVictory()
   } else if (state === 'playing') {
     drawScrollingBackground()
     for (const en of enemies) drawEnemy(en)
