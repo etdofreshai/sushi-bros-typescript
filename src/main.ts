@@ -2775,7 +2775,6 @@ function drawMenuBackground() {
 
 function drawMenu() {
   drawMenuBackground()
-  drawBoat(canvas.width / 2, canvas.height * 0.50)
   ctx.textAlign = 'center'
   const cx = canvas.width / 2
 
