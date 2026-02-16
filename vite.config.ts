@@ -15,6 +15,7 @@ const branchName = (() => {
   } catch {}
   return 'main'
 })()
+const repoName = (() => { try { const url = execSync('git config --get remote.origin.url').toString().trim(); const m = url.match(/\/([^/]+?)(?:\.git)?$/); return m ? m[1] : 'unknown'; } catch { return 'unknown'; } })()
 
 export default defineConfig({
   server: {
@@ -25,5 +26,6 @@ export default defineConfig({
     __BUILD_DATE__: JSON.stringify(new Date().toISOString()),
     __COMMIT_SHA__: JSON.stringify(commitSha),
     __BRANCH_NAME__: JSON.stringify(branchName),
+    __REPO_NAME__: JSON.stringify(repoName),
   },
 })

@@ -3,6 +3,7 @@ import './style.css'
 declare const __BUILD_DATE__: string
 declare const __COMMIT_SHA__: string
 declare const __BRANCH_NAME__: string
+declare const __REPO_NAME__: string
 
 // ─── Canvas Setup ───
 const canvas = document.createElement('canvas')
@@ -2819,7 +2820,7 @@ function drawMenu() {
   // Build info
   const buildDate = new Date(__BUILD_DATE__).toLocaleString()
   ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.font = `${isPortrait ? 9 : 10}px monospace`
-  ctx.fillText(`${__BRANCH_NAME__} · ${__COMMIT_SHA__} · ${buildDate}`, cx, canvas.height - 12)
+  ctx.fillText(`${__REPO_NAME__} · ${__BRANCH_NAME__} · ${__COMMIT_SHA__} · ${buildDate}`, cx, canvas.height - 12)
 }
 
 function drawHighScores() {
@@ -2877,8 +2878,8 @@ function drawControlsScreen() {
   ctx.font = `${infoFs}px monospace`
   ctx.fillStyle = 'rgba(255,255,255,0.35)'
   const infoLines = [
-    'Owner: etdofreshai | Repo: sushi-bros-typescript',
-    'Branch: main | Commit: e700288',
+    `Owner: etdofreshai | Repo: ${__REPO_NAME__}`,
+    `Branch: ${__BRANCH_NAME__} | Commit: ${__COMMIT_SHA__}`,
     `Build: ${__BUILD_DATE__}`,
   ]
   for (let i = 0; i < infoLines.length; i++) {
