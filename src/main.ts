@@ -89,6 +89,7 @@ type EnemyType = 'crab' | 'seagull' | 'fisherman'
 interface Enemy {
   pos: Vec2; vel: Vec2; type: EnemyType; hp: number; radius: number
   timer: number; shootTimer: number; animFrame: number
+  worldY: number; baseX: number; moveFactor: number
 }
 
 interface Sushi { pos: Vec2; vel: Vec2; life: number }
@@ -374,7 +375,7 @@ function startGame() {
   scrollY = 0; scrollSpeed = 1.2
   sushis = []; enemies = []; enemyProjectiles = []; particles = []
   poleSwing = null
-  lastEnemySpawn = 0
+  nextEnemyWorldY = 400
   boatY = canvas.height * 0.7
   resetPlayer()
 }
@@ -391,38 +392,55 @@ function resetPlayer() {
   }
 }
 
-function spawnEnemy() {
-  const types: EnemyType[] = ['crab', 'seagull', 'fisherman']
-  // Difficulty scaling
-  const diff = Math.min(distance / 5000, 1)
-  const weights = [
-    1 - diff * 0.3, // crabs less common later
-    0.3 + diff * 0.4, // seagulls increase
-    diff * 0.5 // fishermen appear later
-  ]
-  const total = weights.reduce((a, b) => a + b)
-  let r = Math.random() * total, type: EnemyType = 'crab'
-  for (let i = 0; i < types.length; i++) {
-    r -= weights[i]
-    if (r <= 0) { type = types[i]; break }
-  }
+// Track the furthest world-Y we've spawned enemies up to
+let nextEnemyWorldY = 400
 
-  const x = 30 + Math.random() * (canvas.width - 60)
-  const enemy: Enemy = {
-    pos: { x, y: -30 },
-    vel: { x: (Math.random() - 0.5) * 2, y: 0.5 + Math.random() * 1.5 },
-    type,
-    hp: type === 'fisherman' ? 3 : type === 'seagull' ? 1 : 2,
-    radius: type === 'fisherman' ? 16 : type === 'seagull' ? 12 : 14,
-    timer: 0,
-    shootTimer: 60 + Math.random() * 120,
-    animFrame: 0
+function spawnEnemiesAhead() {
+  // Spawn enemies in world space ahead of the camera
+  const cameraTopWorldY = scrollY + canvas.height + 200 // a bit above screen
+  while (nextEnemyWorldY < cameraTopWorldY) {
+    // Spawn 1-3 enemies per "row"
+    const count = 1 + Math.floor(Math.random() * 2)
+    for (let c = 0; c < count; c++) {
+      const types: EnemyType[] = ['crab', 'seagull', 'fisherman']
+      const diff = Math.min(nextEnemyWorldY / 5000, 1)
+      const weights = [
+        1 - diff * 0.3,
+        0.3 + diff * 0.4,
+        diff * 0.5
+      ]
+      const total = weights.reduce((a, b) => a + b)
+      let r = Math.random() * total, type: EnemyType = 'crab'
+      for (let i = 0; i < types.length; i++) {
+        r -= weights[i]
+        if (r <= 0) { type = types[i]; break }
+      }
+
+      const x = 30 + Math.random() * (canvas.width - 60)
+      // Movement scales with distance: static early, very slow later
+      // No downward velocity — they don't come at you
+      const moveFactor = Math.min(nextEnemyWorldY / 8000, 0.6) // max 60% of original speed
+      const enemy: Enemy = {
+        pos: { x, y: 0 }, // screen Y computed from worldY each frame
+        vel: { x: 0, y: 0 },
+        type,
+        hp: type === 'fisherman' ? 3 : type === 'seagull' ? 1 : 2,
+        radius: type === 'fisherman' ? 16 : type === 'seagull' ? 12 : 14,
+        timer: Math.random() * 200, // randomize animation phase
+        shootTimer: 80 + Math.random() * 120,
+        animFrame: 0,
+        worldY: nextEnemyWorldY,
+        baseX: x,
+        moveFactor
+      } as any
+      // Slow lateral drift based on distance
+      if (moveFactor > 0.05) {
+        enemy.vel.x = (Math.random() - 0.5) * 1.5 * moveFactor
+      }
+      enemies.push(enemy)
+    }
+    nextEnemyWorldY += 100 + Math.random() * 150
   }
-  if (type === 'seagull') {
-    enemy.vel.y = 1 + Math.random() * 2
-    enemy.vel.x = (Math.random() - 0.5) * 3
-  }
-  enemies.push(enemy)
 }
 
 function spawnParticles(x: number, y: number, count: number, colors: string[]) {
@@ -538,16 +556,8 @@ function update() {
       sushis.splice(i, 1)
   }
 
-  // Enemy spawning
-  const spawnInterval = Math.max(30, 90 - distance / 200)
-  if (frameCount - lastEnemySpawn > spawnInterval) {
-    spawnEnemy()
-    lastEnemySpawn = frameCount
-    // Sometimes spawn groups
-    if (Math.random() < 0.3 + distance / 20000) {
-      setTimeout(() => spawnEnemy(), 200)
-    }
-  }
+  // Spawn enemies ahead in world space
+  spawnEnemiesAhead()
 
   updateEnemies()
 
@@ -644,43 +654,52 @@ function playerDamage() {
 function updateEnemies() {
   for (let i = enemies.length - 1; i >= 0; i--) {
     const en = enemies[i]
-    en.pos.x += en.vel.x
-    en.pos.y += en.vel.y
     en.timer++
     en.animFrame++
 
-    // Bounce off walls
-    if (en.pos.x < en.radius || en.pos.x > canvas.width - en.radius) en.vel.x *= -1
+    // Convert world Y to screen Y
+    en.pos.y = canvas.height - (en.worldY - scrollY)
 
-    // Seagulls sine wave
-    if (en.type === 'seagull') {
-      en.pos.x += Math.sin(en.timer * 0.05) * 1.5
+    // Lateral movement (slow, based on moveFactor)
+    if (en.moveFactor > 0.05) {
+      // Crabs: gentle side-to-side
+      if (en.type === 'crab') {
+        en.pos.x = en.baseX + Math.sin(en.timer * 0.015 * en.moveFactor) * 30 * en.moveFactor
+      }
+      // Seagulls: gentle sine drift
+      else if (en.type === 'seagull') {
+        en.pos.x = en.baseX + Math.sin(en.timer * 0.02 * en.moveFactor) * 40 * en.moveFactor
+      }
+      // Fisherman: very subtle sway
+      else if (en.type === 'fisherman') {
+        en.pos.x = en.baseX + Math.sin(en.timer * 0.01 * en.moveFactor) * 15 * en.moveFactor
+      }
+    } else {
+      en.pos.x = en.baseX
     }
 
-    // Crabs side-to-side
-    if (en.type === 'crab') {
-      en.vel.x = Math.sin(en.timer * 0.03) * 2
-    }
+    // Clamp to screen width
+    en.pos.x = Math.max(en.radius, Math.min(canvas.width - en.radius, en.pos.x))
 
-    // Fisherman shoot
-    if (en.type === 'fisherman' && player.visible) {
+    // Fisherman shoot (only when on screen and close-ish)
+    if (en.type === 'fisherman' && player.visible && en.pos.y > -20 && en.pos.y < canvas.height + 20) {
       en.shootTimer--
       if (en.shootTimer <= 0) {
-        en.shootTimer = 80 + Math.random() * 60
+        en.shootTimer = 120 + Math.random() * 80
         const dx = player.pos.x - en.pos.x, dy = player.pos.y - en.pos.y
         const d = Math.hypot(dx, dy)
-        if (d > 0) {
+        if (d > 0 && d < 300) { // only shoot if player is nearby
           enemyProjectiles.push({
             pos: { x: en.pos.x, y: en.pos.y },
-            vel: { x: dx / d * 3, y: dy / d * 3 },
-            life: 120
+            vel: { x: dx / d * 2.5, y: dy / d * 2.5 },
+            life: 100
           })
         }
       }
     }
 
-    // Remove if off screen
-    if (en.pos.y > canvas.height + 50) enemies.splice(i, 1)
+    // Remove if scrolled well past (below screen)
+    if (en.pos.y > canvas.height + 100) enemies.splice(i, 1)
   }
 }
 
