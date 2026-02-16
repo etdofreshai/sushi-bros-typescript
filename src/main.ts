@@ -126,6 +126,289 @@ function sfxBossDefeat() {
   }
 }
 
+// ─── Screen Transition ───
+let transitionAlpha = 0
+let transitionDir: 'in' | 'out' | 'none' = 'none'
+let transitionSpeed = 0.04
+let transitionCallback: (() => void) | null = null
+
+function startTransition(callback: () => void) {
+  transitionAlpha = 0
+  transitionDir = 'in'
+  transitionSpeed = 0.04
+  transitionCallback = callback
+}
+
+function updateTransition() {
+  if (transitionDir === 'in') {
+    transitionAlpha += transitionSpeed
+    if (transitionAlpha >= 1) {
+      transitionAlpha = 1
+      if (transitionCallback) { transitionCallback(); transitionCallback = null }
+      transitionDir = 'out'
+    }
+  } else if (transitionDir === 'out') {
+    transitionAlpha -= transitionSpeed
+    if (transitionAlpha <= 0) { transitionAlpha = 0; transitionDir = 'none' }
+  }
+}
+
+function drawTransition() {
+  if (transitionDir === 'none') return
+  ctx.fillStyle = `rgba(0,0,0,${transitionAlpha})`
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+}
+
+// ─── Screen Shake ───
+let shakeIntensity = 0
+let shakeDecay = 0.8
+let shakeOffsetX = 0
+let shakeOffsetY = 0
+
+function triggerShake(intensity: number) {
+  shakeIntensity = intensity
+}
+
+function updateShake() {
+  if (shakeIntensity > 0.5) {
+    shakeOffsetX = (Math.random() - 0.5) * shakeIntensity * 2
+    shakeOffsetY = (Math.random() - 0.5) * shakeIntensity * 2
+    shakeIntensity *= shakeDecay
+  } else {
+    shakeIntensity = 0; shakeOffsetX = 0; shakeOffsetY = 0
+  }
+}
+
+// ─── Score Multiplier ───
+let hitStreak = 0
+let scoreMultiplier = 1
+let multiplierDisplayTimer = 0
+
+function addStreakHit() {
+  hitStreak++
+  scoreMultiplier = Math.min(Math.floor(hitStreak / 3) + 1, 10)
+  multiplierDisplayTimer = 120
+}
+
+function resetStreak() {
+  hitStreak = 0; scoreMultiplier = 1
+}
+
+// ─── Power-ups ───
+type PowerUpType = 'speed' | 'triple' | 'shield' | 'life'
+interface PowerUp {
+  pos: Vec2; worldX: number; worldY: number
+  type: PowerUpType; life: number
+}
+
+let powerUps: PowerUp[] = []
+let activeSpeed = 0 // frames remaining
+let activeTriple = 0
+let hasShield = false
+
+const POWERUP_COLORS: Record<PowerUpType, string> = {
+  speed: '#ffdd00', triple: '#ff4444', shield: '#4488ff', life: '#44ff44'
+}
+const POWERUP_LABELS: Record<PowerUpType, string> = {
+  speed: '⚡', triple: '🔥', shield: '🛡', life: '❤'
+}
+
+function spawnPowerUp(x: number, worldY: number) {
+  const r = Math.random()
+  let type: PowerUpType
+  if (r < 0.03) type = 'life'
+  else if (r < 0.06) type = 'shield'
+  else if (r < 0.10) type = 'triple'
+  else type = 'speed'
+  powerUps.push({ pos: { x, y: 0 }, worldX: x, worldY, type, life: 600 })
+}
+
+function updatePowerUps() {
+  if (activeSpeed > 0) activeSpeed--
+  if (activeTriple > 0) activeTriple--
+
+  for (let i = powerUps.length - 1; i >= 0; i--) {
+    const p = powerUps[i]
+    p.worldY -= 0.3 // float down in world space
+    p.pos.x = p.worldX
+    p.pos.y = canvas.height - (p.worldY - scrollY)
+    p.life--
+    if (p.life <= 0 || p.pos.y > canvas.height + 30 || p.pos.y < -30) {
+      powerUps.splice(i, 1); continue
+    }
+    // Collect
+    if (player.visible && Math.hypot(player.pos.x - p.pos.x, player.pos.y - p.pos.y) < player.radius + 12) {
+      applyPowerUp(p.type)
+      powerUps.splice(i, 1)
+    }
+  }
+}
+
+function applyPowerUp(type: PowerUpType) {
+  if (type === 'speed') activeSpeed = 300
+  else if (type === 'triple') activeTriple = 300
+  else if (type === 'shield') hasShield = true
+  else if (type === 'life') lives++
+  // SFX
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain()
+  o.connect(g); g.connect(audioCtx.destination); o.type = 'sine'
+  o.frequency.setValueAtTime(800, audioCtx.currentTime)
+  o.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.15)
+  g.gain.setValueAtTime(0.08, audioCtx.currentTime)
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15)
+  o.start(); o.stop(audioCtx.currentTime + 0.15)
+}
+
+function drawPowerUps() {
+  for (const p of powerUps) {
+    const bob = Math.sin(frameCount * 0.06 + p.worldY) * 3
+    const alpha = p.life < 60 ? p.life / 60 : 1
+    ctx.globalAlpha = alpha
+    // Glow
+    ctx.fillStyle = POWERUP_COLORS[p.type] + '44'
+    ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y + bob, 14, 0, Math.PI * 2); ctx.fill()
+    // Circle
+    ctx.fillStyle = POWERUP_COLORS[p.type]
+    ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y + bob, 9, 0, Math.PI * 2); ctx.fill()
+    // Label
+    ctx.fillStyle = '#000'; ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center'
+    ctx.fillText(POWERUP_LABELS[p.type], p.pos.x, p.pos.y + bob + 4)
+    ctx.globalAlpha = 1
+  }
+}
+
+// ─── Background Music ───
+let musicPlaying = false
+let musicMuted = false
+let musicGain: GainNode | null = null
+let musicOscillators: OscillatorNode[] = []
+let currentMusicLevel = -1
+
+function startMusic(level: number) {
+  stopMusic()
+  if (musicMuted) { currentMusicLevel = level; return }
+  currentMusicLevel = level
+  musicGain = audioCtx.createGain()
+  musicGain.gain.value = 0.04
+  musicGain.connect(audioCtx.destination)
+  musicPlaying = true
+
+  // Different mood per level using oscillators
+  const t = audioCtx.currentTime
+  if (level === 0) {
+    // Calm oceanic - low sine drones
+    const freqs = [130.81, 164.81, 196.00] // C3, E3, G3
+    for (const f of freqs) {
+      const o = audioCtx.createOscillator()
+      const g = audioCtx.createGain()
+      o.type = 'sine'; o.frequency.value = f
+      g.gain.value = 0.3
+      // Slow LFO tremolo
+      const lfo = audioCtx.createOscillator()
+      const lfoG = audioCtx.createGain()
+      lfo.frequency.value = 0.3 + Math.random() * 0.2
+      lfoG.gain.value = 0.15
+      lfo.connect(lfoG); lfoG.connect(g.gain)
+      lfo.start(t)
+      o.connect(g); g.connect(musicGain!)
+      o.start(t)
+      musicOscillators.push(o, lfo)
+    }
+  } else if (level === 1) {
+    // Upbeat beachy - major key arpeggios
+    const freqs = [261.63, 329.63, 392.00, 329.63] // C4, E4, G4, E4
+    for (let i = 0; i < freqs.length; i++) {
+      const o = audioCtx.createOscillator()
+      const g = audioCtx.createGain()
+      o.type = 'triangle'; o.frequency.value = freqs[i]
+      // Rhythmic pulsing
+      const lfo = audioCtx.createOscillator()
+      const lfoG = audioCtx.createGain()
+      lfo.frequency.value = 2 + i * 0.5
+      lfoG.gain.value = 0.4
+      lfo.connect(lfoG); lfoG.connect(g.gain)
+      lfo.start(t)
+      g.gain.value = 0.25
+      o.connect(g); g.connect(musicGain!)
+      o.start(t)
+      musicOscillators.push(o, lfo)
+    }
+  } else if (level === 2) {
+    // Intense jungle - minor key, faster
+    const freqs = [220.00, 261.63, 329.63] // A3, C4, E4 (A minor)
+    for (let i = 0; i < freqs.length; i++) {
+      const o = audioCtx.createOscillator()
+      const g = audioCtx.createGain()
+      o.type = 'sawtooth'; o.frequency.value = freqs[i]
+      const lfo = audioCtx.createOscillator()
+      const lfoG = audioCtx.createGain()
+      lfo.frequency.value = 3 + i
+      lfoG.gain.value = 0.35
+      lfo.connect(lfoG); lfoG.connect(g.gain)
+      lfo.start(t)
+      g.gain.value = 0.15
+      o.connect(g); g.connect(musicGain!)
+      o.start(t)
+      musicOscillators.push(o, lfo)
+    }
+  } else {
+    // Boss - dramatic, heavy bass
+    const bass = audioCtx.createOscillator()
+    const bassG = audioCtx.createGain()
+    bass.type = 'sawtooth'; bass.frequency.value = 65.41 // C2
+    bassG.gain.value = 0.5
+    const lfo = audioCtx.createOscillator()
+    const lfoG = audioCtx.createGain()
+    lfo.frequency.value = 4; lfoG.gain.value = 0.4
+    lfo.connect(lfoG); lfoG.connect(bassG.gain)
+    lfo.start(t)
+    bass.connect(bassG); bassG.connect(musicGain!)
+    bass.start(t)
+    const mid = audioCtx.createOscillator()
+    const midG = audioCtx.createGain()
+    mid.type = 'square'; mid.frequency.value = 155.56
+    midG.gain.value = 0.2
+    mid.connect(midG); midG.connect(musicGain!)
+    mid.start(t)
+    musicOscillators.push(bass, lfo, mid)
+  }
+}
+
+function stopMusic() {
+  for (const o of musicOscillators) { try { o.stop() } catch(_e) { /* ignore */ } }
+  musicOscillators = []
+  if (musicGain) { try { musicGain.disconnect() } catch(_e) { /* ignore */ } }
+  musicGain = null; musicPlaying = false; currentMusicLevel = -1
+}
+
+function toggleMusicMute() {
+  musicMuted = !musicMuted
+  if (musicMuted) { stopMusic() }
+  else if (currentMusicLevel >= 0 || state === 'playing') {
+    startMusic(currentLevel >= 3 ? 3 : currentLevel)
+  }
+}
+
+// ─── Victory Jingle ───
+function playVictoryJingle() {
+  if (musicMuted) return
+  const t = audioCtx.currentTime
+  const notes = [523.25, 659.25, 783.99, 1046.50, 783.99, 1046.50, 1318.51]
+  for (let i = 0; i < notes.length; i++) {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain()
+    o.connect(g); g.connect(audioCtx.destination)
+    o.type = 'sine'
+    const ns = t + i * 0.12
+    o.frequency.setValueAtTime(notes[i], ns)
+    g.gain.setValueAtTime(0.1, ns)
+    g.gain.exponentialRampToValueAtTime(0.001, ns + 0.3)
+    o.start(ns); o.stop(ns + 0.3)
+  }
+}
+
+// ─── Water Splash Tracking ───
+let playerWasOnWater = false
+
 // ─── Types ───
 interface Vec2 { x: number; y: number }
 
@@ -378,12 +661,13 @@ addEventListener('keydown', e => {
   if (state === 'highscores' || state === 'controls') {
     if (e.code === 'Escape' || e.code === 'Enter') { state = 'menu' }
   }
-  if (state === 'gameover' && e.code === 'Enter') startNewRun()
-  if (state === 'gameover' && e.code === 'Escape') { state = 'menu' }
+  if (state === 'gameover' && e.code === 'Enter') startTransition(() => startNewRun())
+  if (state === 'gameover' && e.code === 'Escape') startTransition(() => { state = 'menu'; stopMusic() })
   if (state === 'levelComplete' && e.code === 'Enter') advanceLevel()
-  if (state === 'victory' && e.code === 'Enter') startNewRun()
-  if (state === 'victory' && e.code === 'Escape') { state = 'menu' }
+  if (state === 'victory' && e.code === 'Enter') startTransition(() => startNewRun())
+  if (state === 'victory' && e.code === 'Escape') startTransition(() => { state = 'menu'; stopMusic() })
   if (state === 'playing' && (e.code === 'Escape' || e.code === 'KeyP')) { paused = !paused }
+  if (state === 'playing' && e.code === 'KeyM' && paused) { toggleMusicMute() }
 })
 addEventListener('keyup', e => { keys[e.code] = false })
 
@@ -583,17 +867,19 @@ function throwSushi() {
   if (audioCtx.state === 'suspended') audioCtx.resume()
   sfxSushiThrow()
   const speed = 7
-  // On touch use right-stick aim angle; on keyboard use facing direction
   const angle = (isTouchDevice && fireActive) ? shootAngle : player.facing
-  const spawnScreenX = player.pos.x + Math.cos(angle) * 16
-  const spawnScreenY = player.pos.y + Math.sin(angle) * 16
-  sushis.push({
-    pos: { x: spawnScreenX, y: spawnScreenY },
-    vel: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
-    life: 80,
-    worldX: spawnScreenX,
-    worldY: scrollY + (canvas.height - spawnScreenY)
-  })
+  const angles = activeTriple > 0 ? [angle - 0.2, angle, angle + 0.2] : [angle]
+  for (const a of angles) {
+    const spawnScreenX = player.pos.x + Math.cos(a) * 16
+    const spawnScreenY = player.pos.y + Math.sin(a) * 16
+    sushis.push({
+      pos: { x: spawnScreenX, y: spawnScreenY },
+      vel: { x: Math.cos(a) * speed, y: Math.sin(a) * speed },
+      life: 80,
+      worldX: spawnScreenX,
+      worldY: scrollY + (canvas.height - spawnScreenY)
+    })
+  }
 }
 
 function activatePole() {
@@ -612,7 +898,7 @@ function activatePole() {
 let menuItemBounds: { x: number; y: number; w: number; h: number }[] = []
 
 function handleMenuSelect() {
-  if (menuSelection === 0) startNewRun()
+  if (menuSelection === 0) startTransition(() => startNewRun())
   else if (menuSelection === 1) state = 'highscores'
   else if (menuSelection === 2) state = 'controls'
 }
@@ -630,6 +916,7 @@ function handleMenuClick(cx: number, cy: number) {
 function startNewRun() {
   if (audioCtx.state === 'suspended') audioCtx.resume()
   score = 0; lives = 3; currentLevel = 0
+  resetStreak()
   beginLevel(0)
 }
 
@@ -647,17 +934,20 @@ function beginLevel(level: number) {
   bossClearTimer = 0
   bossProjectiles = []
   tentacleSweeps = []
+  powerUps = []
+  activeSpeed = 0; activeTriple = 0; hasShield = false
+  playerWasOnWater = false
   resetPlayer()
   state = 'levelIntro'
-  levelIntroTimer = 120 // ~2 seconds at 60fps
+  levelIntroTimer = 120
+  startMusic(level)
 }
 
 function advanceLevel() {
   if (currentLevel < LEVEL_CONFIGS.length - 1) {
-    beginLevel(currentLevel + 1)
+    startTransition(() => beginLevel(currentLevel + 1))
   } else {
-    saveHighScore(score, currentLevel + 1)
-    state = 'victory'
+    startTransition(() => { saveHighScore(score, currentLevel + 1); state = 'victory'; playVictoryJingle(); stopMusic() })
   }
 }
 
@@ -777,6 +1067,8 @@ function spawnParticles(x: number, y: number, count: number, colors: string[]) {
 // ─── Update ───
 function update() {
   frameCount++
+  updateTransition()
+  updateShake()
 
   if (state === 'menu' || state === 'gameover' || state === 'highscores' || state === 'controls' || state === 'levelComplete' || state === 'victory') return
   if (state === 'levelIntro') {
@@ -802,6 +1094,13 @@ function update() {
   const playerWorldYForTerrain = scrollY + (canvas.height - player.pos.y)
   const playerTerrain = getTerrainAt(playerWorldYForTerrain)
   const onWater = playerTerrain === 'water'
+
+  // Water splash particles
+  if (onWater !== playerWasOnWater && player.visible) {
+    spawnParticles(player.pos.x, player.pos.y, 12, ['#4488ff', '#66aaff', '#88ccff', '#aaddff'])
+    sfxSplash()
+  }
+  playerWasOnWater = onWater
 
   // Player movement
   let moveX = 0, moveY = 0
@@ -834,7 +1133,8 @@ function update() {
     }
   }
 
-  const playerSpeed = onWater ? 2.5 : 3.5
+  const baseSpeed = onWater ? 2.5 : 3.5
+  const playerSpeed = activeSpeed > 0 ? baseSpeed * 1.5 : baseSpeed
   player.pos.x += moveX * playerSpeed
   player.pos.y += moveY * playerSpeed
 
@@ -886,6 +1186,7 @@ function update() {
       enemyProjectiles = []
       bossFightState = 'fighting'
       currentBoss = createBoss(currentLevel)
+      startMusic(3) // boss music
     }
   }
   if (bossFightState === 'fighting' && currentBoss) {
@@ -904,12 +1205,16 @@ function update() {
     }
     if (currentBoss.defeatTimer <= 0) {
       const bonuses = [500, 1000, 2000]
-      score += bonuses[currentLevel] || 500
+      score += (bonuses[currentLevel] || 500) * scoreMultiplier
       if (currentLevel >= LEVEL_CONFIGS.length - 1) {
         saveHighScore(score, currentLevel + 1)
         state = 'victory'
+        playVictoryJingle()
+        stopMusic()
       } else {
         state = 'levelComplete'
+        playVictoryJingle()
+        stopMusic()
       }
       bossFightState = 'none'
       currentBoss = null
@@ -940,9 +1245,17 @@ function update() {
   for (let i = sushis.length - 1; i >= 0; i--) {
     const s = sushis[i]
     s.worldX += s.vel.x; s.worldY -= s.vel.y; s.life--
-    // Convert to screen space for rendering and collision
     s.pos.x = s.worldX
     s.pos.y = canvas.height - (s.worldY - scrollY)
+    // Sushi trail particles
+    if (frameCount % 3 === 0) {
+      particles.push({
+        pos: { x: s.pos.x + (Math.random() - 0.5) * 4, y: s.pos.y + (Math.random() - 0.5) * 4 },
+        vel: { x: (Math.random() - 0.5) * 0.5, y: (Math.random() - 0.5) * 0.5 },
+        life: 10 + Math.random() * 8, maxLife: 18,
+        color: ['#ffffff', '#fff5e6', '#ffe8cc'][Math.floor(Math.random() * 3)]
+      })
+    }
     if (s.life <= 0 || s.pos.x < -20 || s.pos.x > canvas.width + 20 || s.pos.y < -20 || s.pos.y > canvas.height + 20)
       sushis.splice(i, 1)
   }
@@ -983,14 +1296,17 @@ function update() {
       if (Math.hypot(s.pos.x - en.pos.x, s.pos.y - en.pos.y) < en.radius + 6) {
         sushis.splice(si, 1)
         en.hp--
+        addStreakHit()
         if (en.hp <= 0) {
           const pts = en.type === 'fisherman' ? 300 : en.type === 'seagull' ? 100 : 150
-          score += pts
-          const colors = en.type === 'crab' ? ['#ff4444', '#ff8844', '#ffaa66'] :
-                         en.type === 'seagull' ? ['#ffffff', '#cccccc', '#aaaaaa'] :
-                         ['#4488ff', '#6699ff', '#88bbff']
-          spawnParticles(en.pos.x, en.pos.y, 12, colors)
+          score += pts * scoreMultiplier
+          const colors = en.type === 'crab' ? ['#ff4444', '#ff8844', '#ffaa66', '#ff2222', '#ffcc44'] :
+                         en.type === 'seagull' ? ['#ffffff', '#cccccc', '#aaaaaa', '#eeeeff', '#ddddee'] :
+                         ['#4488ff', '#6699ff', '#88bbff', '#3366dd', '#aaccff']
+          spawnParticles(en.pos.x, en.pos.y, 20, colors) // More dramatic
           sfxHit()
+          // Power-up drop chance
+          if (Math.random() < 0.12) spawnPowerUp(en.pos.x, en.worldY)
           enemies.splice(ei, 1)
         } else {
           spawnParticles(en.pos.x, en.pos.y, 4, ['#ffffff', '#ffff88'])
@@ -1017,6 +1333,8 @@ function update() {
         sushis.splice(si, 1)
         currentBoss.hp--
         currentBoss.flashTimer = 6
+        triggerShake(3)
+        addStreakHit()
         spawnParticles(currentBoss.pos.x, currentBoss.pos.y, 6, ['#ffffff', '#ffff88'])
         sfxHit()
         if (currentBoss.hp <= 0 && !currentBoss.defeated) {
@@ -1024,9 +1342,9 @@ function update() {
           currentBoss.defeatTimer = 90
           bossFightState = 'defeated'
           sfxBossDefeat()
+          triggerShake(8)
           spawnParticles(currentBoss.pos.x, currentBoss.pos.y, 30, ['#ff4444', '#ffaa00', '#ffff44', '#ffffff'])
         }
-        // Check phase transition
         if (currentBoss.hp > 0 && currentBoss.hp <= currentBoss.maxHp * 0.5 && currentBoss.currentPhase === 0) {
           currentBoss.currentPhase = 1
           currentBoss.attackTimer = 30
@@ -1116,11 +1434,13 @@ function update() {
       const en = enemies[ei]
       if (Math.hypot(px - en.pos.x, py - en.pos.y) < en.radius + 20) {
         en.hp -= 2
+        addStreakHit()
         if (en.hp <= 0) {
-          score += (en.type === 'fisherman' ? 400 : en.type === 'seagull' ? 150 : 200)
+          score += (en.type === 'fisherman' ? 400 : en.type === 'seagull' ? 150 : 200) * scoreMultiplier
           const colors = ['#ffaa00', '#ff8800', '#ffcc44']
-          spawnParticles(en.pos.x, en.pos.y, 15, colors)
+          spawnParticles(en.pos.x, en.pos.y, 20, colors)
           sfxHit()
+          if (Math.random() < 0.12) spawnPowerUp(en.pos.x, en.worldY)
           enemies.splice(ei, 1)
         }
       }
@@ -1158,16 +1478,30 @@ function update() {
   else if (fireOpacity > 0.35) { fireOpacity -= 0.02; if (fireOpacity < 0.35) fireOpacity = 0.35 }
 
   updateParticles()
+  updatePowerUps()
+  updateShake()
+  if (multiplierDisplayTimer > 0) multiplierDisplayTimer--
 }
 
 function playerDamage() {
+  // Shield absorbs hit
+  if (hasShield) {
+    hasShield = false
+    spawnParticles(player.pos.x, player.pos.y, 15, ['#4488ff', '#66aaff', '#88ccff'])
+    player.invulnTimer = 30
+    triggerShake(3)
+    return
+  }
   spawnParticles(player.pos.x, player.pos.y, 20, ['#ffffff', '#ff4444', '#ffaa00'])
   sfxPlayerHit()
+  triggerShake(5)
+  resetStreak()
   player.visible = false
   lives--
   if (lives <= 0) {
     state = 'gameover'
     saveHighScore(score, currentLevel + 1)
+    stopMusic()
   } else {
     player.respawnTimer = 90
   }
@@ -2279,6 +2613,23 @@ function drawHUD() {
     ctx.beginPath(); ctx.arc(lx, ly + 2, 5, 0, Math.PI * 2); ctx.fill()
   }
 
+  // Score multiplier
+  if (scoreMultiplier > 1 && multiplierDisplayTimer > 0) {
+    ctx.fillStyle = '#ffdd00'; ctx.font = `bold ${isPortrait ? 14 : 16}px monospace`
+    ctx.textAlign = 'left'
+    ctx.fillText(`x${scoreMultiplier}`, 15 + ctx.measureText(`SCORE: ${score}`).width + 10, 30)
+  }
+
+  // Active power-up indicators
+  {
+    let px = 20
+    const py = 68
+    ctx.font = `bold ${isPortrait ? 11 : 13}px monospace`; ctx.textAlign = 'left'
+    if (activeSpeed > 0) { ctx.fillStyle = '#ffdd00'; ctx.fillText(`⚡${Math.ceil(activeSpeed / 60)}s`, px, py); px += 45 }
+    if (activeTriple > 0) { ctx.fillStyle = '#ff4444'; ctx.fillText(`🔥${Math.ceil(activeTriple / 60)}s`, px, py); px += 45 }
+    if (hasShield) { ctx.fillStyle = '#4488ff'; ctx.fillText('🛡', px, py); px += 25 }
+  }
+
   // Distance
   ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
   ctx.textAlign = 'center'
@@ -2596,9 +2947,9 @@ let victoryBtnMenu = { x: 0, y: 0, w: 0, h: 0 }
 
 function handleVictoryClick(cx: number, cy: number) {
   if (cx >= victoryBtnPlay.x && cx <= victoryBtnPlay.x + victoryBtnPlay.w &&
-      cy >= victoryBtnPlay.y && cy <= victoryBtnPlay.y + victoryBtnPlay.h) startNewRun()
+      cy >= victoryBtnPlay.y && cy <= victoryBtnPlay.y + victoryBtnPlay.h) startTransition(() => startNewRun())
   else if (cx >= victoryBtnMenu.x && cx <= victoryBtnMenu.x + victoryBtnMenu.w &&
-           cy >= victoryBtnMenu.y && cy <= victoryBtnMenu.y + victoryBtnMenu.h) state = 'menu'
+           cy >= victoryBtnMenu.y && cy <= victoryBtnMenu.y + victoryBtnMenu.h) startTransition(() => { state = 'menu'; stopMusic() })
 }
 
 function drawVictory() {
@@ -2649,9 +3000,9 @@ let gameOverBtnMenu = { x: 0, y: 0, w: 0, h: 0 }
 
 function handleGameOverClick(cx: number, cy: number) {
   if (cx >= gameOverBtnPlay.x && cx <= gameOverBtnPlay.x + gameOverBtnPlay.w &&
-      cy >= gameOverBtnPlay.y && cy <= gameOverBtnPlay.y + gameOverBtnPlay.h) startNewRun()
+      cy >= gameOverBtnPlay.y && cy <= gameOverBtnPlay.y + gameOverBtnPlay.h) startTransition(() => startNewRun())
   else if (cx >= gameOverBtnMenu.x && cx <= gameOverBtnMenu.x + gameOverBtnMenu.w &&
-           cy >= gameOverBtnMenu.y && cy <= gameOverBtnMenu.y + gameOverBtnMenu.h) state = 'menu'
+           cy >= gameOverBtnMenu.y && cy <= gameOverBtnMenu.y + gameOverBtnMenu.h) startTransition(() => { state = 'menu'; stopMusic() })
 }
 
 function drawGameOver() {
@@ -2703,6 +3054,12 @@ function drawGameOver() {
 }
 
 function draw() {
+  ctx.save()
+  // Apply screen shake
+  if (shakeIntensity > 0) {
+    ctx.translate(shakeOffsetX, shakeOffsetY)
+  }
+
   if (state === 'menu') {
     drawMenu()
   } else if (state === 'highscores') {
@@ -2725,7 +3082,14 @@ function draw() {
     drawPlayer()
     drawSushis()
     drawEnemyProjectiles()
+    drawPowerUps()
     drawParticles()
+    // Shield visual around player
+    if (hasShield && player.visible) {
+      ctx.strokeStyle = `rgba(68,136,255,${0.3 + Math.sin(frameCount * 0.1) * 0.15})`
+      ctx.lineWidth = 2
+      ctx.beginPath(); ctx.arc(player.pos.x, player.pos.y, player.radius + 6, 0, Math.PI * 2); ctx.stroke()
+    }
     drawHUD()
     if (bossFightState === 'fighting' || bossFightState === 'defeated') drawBossHealthBar()
     drawBossWarning()
@@ -2738,12 +3102,19 @@ function draw() {
       ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2)
       ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = `${isPortrait ? 14 : 18}px monospace`
       ctx.fillText(isTouchDevice ? 'TAP ▶ TO RESUME' : 'PRESS P OR ESC', canvas.width / 2, canvas.height / 2 + 40)
+      // Mute toggle in pause menu
+      ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
+      ctx.fillText(`MUSIC: ${musicMuted ? 'OFF' : 'ON'}  (press M)`, canvas.width / 2, canvas.height / 2 + 70)
     }
   } else if (state === 'gameover') {
     drawScrollingBackground()
     drawParticles()
     drawGameOver()
   }
+
+  ctx.restore()
+  // Transition overlay (not affected by shake)
+  drawTransition()
 }
 
 // ─── Loop ───
