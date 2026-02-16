@@ -2633,7 +2633,7 @@ function drawHUD() {
   }
 
   // Distance
-  ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
+  ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
   ctx.textAlign = 'center'
   ctx.fillText(`${distance}m`, canvas.width / 2, 25)
 
@@ -2809,7 +2809,7 @@ function drawMenu() {
   }
 
   if (!isTouchDevice) {
-    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
+    ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
     ctx.fillText('↑↓ SELECT   ENTER TO CONFIRM', cx, canvas.height * 0.90)
   }
 }
@@ -2835,7 +2835,7 @@ function drawHighScores() {
       ctx.fillText(`${i + 1}. ${s.score}  (Lv${s.level})  ${s.date}`, cx, y)
     }
   }
-  ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
+  ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
   ctx.fillText(isTouchDevice ? 'TAP TO GO BACK' : 'PRESS ESC OR ENTER', cx, canvas.height * 0.85)
 }
 
@@ -2861,7 +2861,7 @@ function drawControlsScreen() {
   for (let i = 0; i < lines.length; i++) {
     ctx.fillText(lines[i], cx, canvas.height * 0.35 + i * (fs + 12))
   }
-  ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
+  ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
   ctx.fillText(isTouchDevice ? 'TAP TO GO BACK' : 'PRESS ESC OR ENTER', cx, canvas.height * 0.85)
 }
 
@@ -2926,7 +2926,7 @@ function drawLevelComplete() {
   ctx.fillText('NEXT LEVEL →', cx, btnY + btnH / 2 + 6)
 
   if (!isTouchDevice) {
-    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
+    ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
     ctx.fillText('PRESS ENTER TO CONTINUE', cx, canvas.height * 0.80)
   }
 }
@@ -3037,7 +3037,7 @@ function drawGameOver() {
   ctx.fillText('MAIN MENU', cx, menuBtnY + btnH / 2 + 5)
 
   if (!isTouchDevice) {
-    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
+    ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
     ctx.fillText('ENTER — PLAY AGAIN    ESC — MAIN MENU', cx, menuBtnY + btnH + 25)
   }
 }
@@ -3092,7 +3092,7 @@ function draw() {
       ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = `${isPortrait ? 14 : 18}px monospace`
       ctx.fillText(isTouchDevice ? 'TAP ▶ TO RESUME' : 'PRESS P OR ESC', canvas.width / 2, canvas.height / 2 + 40)
       // Mute toggle in pause menu
-      ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
+      ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
       ctx.fillText(`MUSIC: ${musicMuted ? 'OFF' : 'ON'}  (press M)`, canvas.width / 2, canvas.height / 2 + 70)
     }
   } else if (state === 'gameover') {
