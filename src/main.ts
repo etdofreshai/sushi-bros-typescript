@@ -450,7 +450,7 @@ function update() {
   // When player moves up (screen Y decreases), world Y increases
   const playerWorldY = scrollY + (canvas.height - player.pos.y)
   // Only scroll forward (never backward) — smooth scroll with lerp
-  const targetScrollY = playerWorldY - canvas.height * 0.7
+  const targetScrollY = playerWorldY - canvas.height * 0.25
   if (targetScrollY > scrollY) {
     // Slow, smooth scroll — lerp toward target
     scrollY += (targetScrollY - scrollY) * 0.03
