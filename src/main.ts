@@ -144,14 +144,24 @@ const SEGMENT_H = 200
 // The world scrolls: worldY increases as player progresses
 // Screen shows worldY = scrollY at bottom, scrollY + canvas.height at top
 
+// Simple deterministic hash for stable terrain transitions
+function hashY(y: number): number {
+  let h = (y * 2654435761) | 0
+  h = ((h >>> 16) ^ h) * 0x45d9f3b | 0
+  h = ((h >>> 16) ^ h) | 0
+  return (h & 0x7fffffff) / 0x7fffffff // 0..1
+}
+
 function getTerrainAt(worldY: number): TerrainType {
   // worldY increases upward (forward progress)
   // Start on water, transition to sand then grass
   const d = worldY
+  // Quantize to avoid per-pixel noise in transitions
+  const qd = Math.floor(d / 8) * 8
   if (d < 800) return 'water'
-  if (d < 1200) return Math.random() > (d - 800) / 400 ? 'water' : 'sand'
+  if (d < 1200) return hashY(qd) > (d - 800) / 400 ? 'water' : 'sand'
   if (d < 1600) return 'sand'
-  if (d < 2000) return Math.random() > (d - 1600) / 400 ? 'sand' : 'grass'
+  if (d < 2000) return hashY(qd) > (d - 1600) / 400 ? 'sand' : 'grass'
   // After 2000: mostly grass with occasional sand/water patches
   const cycle = (d % 3000)
   if (cycle < 2000) return 'grass'
