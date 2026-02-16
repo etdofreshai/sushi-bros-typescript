@@ -491,15 +491,13 @@ function update() {
   if (state === 'gameover') return
   if (paused) return
 
-  // Camera follows player: scrollY tracks how far "up" the player has gone
-  // Player's world Y = scrollY + (canvas.height - player.pos.y)
-  // When player moves up (screen Y decreases), world Y increases
-  const playerWorldY = scrollY + (canvas.height - player.pos.y)
-  // Only scroll forward (never backward) — smooth scroll with lerp
-  const targetScrollY = playerWorldY - canvas.height * 0.25
-  if (targetScrollY > scrollY) {
-    // Slow, smooth scroll — lerp toward target
-    scrollY += (targetScrollY - scrollY) * 0.03
+  // Camera: dead zone scrolling. Bottom 67% = free movement, no scroll.
+  // When player enters top 33%, camera scrolls up instantly to pin player at threshold.
+  const scrollThreshold = canvas.height * 0.33
+  if (player.pos.y < scrollThreshold) {
+    const diff = scrollThreshold - player.pos.y
+    scrollY += diff
+    player.pos.y = scrollThreshold
   }
   distance = Math.floor(scrollY)
 
