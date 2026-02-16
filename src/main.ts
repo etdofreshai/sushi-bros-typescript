@@ -2,6 +2,7 @@ import './style.css'
 
 declare const __BUILD_DATE__: string
 declare const __COMMIT_SHA__: string
+declare const __BRANCH_NAME__: string
 
 // ─── Canvas Setup ───
 const canvas = document.createElement('canvas')
@@ -2818,7 +2819,7 @@ function drawMenu() {
   // Build info
   const buildDate = new Date(__BUILD_DATE__).toLocaleString()
   ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.font = `${isPortrait ? 9 : 10}px monospace`
-  ctx.fillText(`${__COMMIT_SHA__} · ${buildDate}`, cx, canvas.height - 12)
+  ctx.fillText(`${__BRANCH_NAME__} · ${__COMMIT_SHA__} · ${buildDate}`, cx, canvas.height - 12)
 }
 
 function drawHighScores() {
