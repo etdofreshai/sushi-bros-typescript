@@ -489,7 +489,7 @@ const TERRAIN_COLORS: Record<TerrainType, string> = {
 
 // ─── Control Mode ───
 type ControlMode = 'direction' | 'spin'
-let controlMode: ControlMode = (localStorage.getItem('sushi-bros-ctrl') as ControlMode) || 'direction'
+let controlMode: ControlMode = 'direction'
 
 // ─── Level System ───
 interface LevelConfig {
@@ -668,7 +668,6 @@ addEventListener('keydown', e => {
     if (e.code === 'ArrowUp' || e.code === 'KeyW') { menuSelection = (menuSelection - 1 + MENU_ITEMS.length) % MENU_ITEMS.length }
     if (e.code === 'ArrowDown' || e.code === 'KeyS') { menuSelection = (menuSelection + 1) % MENU_ITEMS.length }
     if (e.code === 'Enter' || e.code === 'Space') { handleMenuSelect() }
-    if (e.code === 'Tab') { e.preventDefault(); toggleControlMode() }
   }
   if (state === 'highscores' || state === 'controls') {
     if (e.code === 'Escape' || e.code === 'Enter') { state = 'menu' }
@@ -750,10 +749,6 @@ canvas.addEventListener('touchstart', e => {
   if (audioCtx.state === 'suspended') audioCtx.resume()
   if (state === 'menu') {
     const t0 = e.changedTouches[0]
-    const b = ctrlToggleBounds
-    if (t0.clientX >= b.x && t0.clientX <= b.x + b.w && t0.clientY >= b.y && t0.clientY <= b.y + b.h) {
-      toggleControlMode(); return
-    }
     handleMenuClick(t0.clientX, t0.clientY); return
   }
   if (state === 'highscores' || state === 'controls') { state = 'menu'; return }
@@ -846,11 +841,6 @@ canvas.addEventListener('touchcancel', e => {
     if (e.changedTouches[i].identifier === poleTouchId) { poleTouchId = null; poleActive = false }
   }
 })
-
-function toggleControlMode() {
-  controlMode = controlMode === 'spin' ? 'direction' : 'spin'
-  localStorage.setItem('sushi-bros-ctrl', controlMode)
-}
 
 let ctrlToggleBounds = { x: 0, y: 0, w: 0, h: 0 }
 
@@ -2817,19 +2807,6 @@ function drawMenu() {
     ctx.fillStyle = 'rgba(255,200,100,0.6)'; ctx.font = `${isPortrait ? 14 : 16}px monospace`
     ctx.fillText(`HIGH SCORE: ${highScore}`, cx, canvas.height * 0.72)
   }
-
-  // Control mode toggle
-  const ctrlFont = isPortrait ? 14 : 16
-  ctx.font = `${ctrlFont}px monospace`
-  const modeLabel = controlMode === 'direction' ? '► DIRECTION MODE' : '► SPIN & THROTTLE'
-  const toggleText = isTouchDevice ? `[ ${modeLabel} ]  TAP TO CHANGE` : `[ ${modeLabel} ]  TAB TO CHANGE`
-  const toggleY = canvas.height * 0.80
-  const tw = ctx.measureText(toggleText).width
-  ctrlToggleBounds = { x: cx - tw / 2 - 10, y: toggleY - ctrlFont - 2, w: tw + 20, h: ctrlFont + 12 }
-  ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1
-  ctx.strokeRect(ctrlToggleBounds.x, ctrlToggleBounds.y, ctrlToggleBounds.w, ctrlToggleBounds.h)
-  ctx.fillStyle = 'rgba(255,255,255,0.6)'
-  ctx.fillText(toggleText, cx, toggleY)
 
   if (!isTouchDevice) {
     ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
