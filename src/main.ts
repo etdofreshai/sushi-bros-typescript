@@ -445,12 +445,16 @@ function update() {
   if (state === 'gameover') return
   if (paused) return
 
-  // Auto-scroll
-  scrollY += scrollSpeed
+  // Camera follows player: scrollY tracks how far "up" the player has gone
+  // Player's world Y = scrollY + (canvas.height - player.pos.y)
+  // When player moves up (screen Y decreases), world Y increases
+  const playerWorldY = scrollY + (canvas.height - player.pos.y)
+  // Only scroll forward (never backward) — once you pass a point, it stays
+  const targetScrollY = playerWorldY - canvas.height * 0.7 // keep player at ~70% from top
+  if (targetScrollY > scrollY) {
+    scrollY = targetScrollY
+  }
   distance = Math.floor(scrollY)
-
-  // Gradually increase speed
-  scrollSpeed = 1.2 + Math.min(distance / 10000, 1.5)
 
   // Respawn logic
   if (player.respawnTimer > 0) {
@@ -489,9 +493,9 @@ function update() {
   player.pos.x += moveX * playerSpeed
   player.pos.y += moveY * playerSpeed
 
-  // Keep player on screen
+  // Keep player on screen (allow moving to top to scroll forward)
   player.pos.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.pos.x))
-  player.pos.y = Math.max(player.radius + 60, Math.min(canvas.height - player.radius - 20, player.pos.y))
+  player.pos.y = Math.max(player.radius + 20, Math.min(canvas.height - player.radius - 20, player.pos.y))
 
   // Keyboard actions
   if (keys['Space']) { keys['Space'] = false; throwSushi() }
