@@ -1,6 +1,7 @@
 import './style.css'
 
 declare const __BUILD_DATE__: string
+declare const __COMMIT_SHA__: string
 
 // ─── Canvas Setup ───
 const canvas = document.createElement('canvas')
@@ -2813,6 +2814,11 @@ function drawMenu() {
     ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
     ctx.fillText('↑↓ SELECT   ENTER TO CONFIRM', cx, canvas.height * 0.90)
   }
+
+  // Build info
+  const buildDate = new Date(__BUILD_DATE__).toLocaleString()
+  ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.font = `${isPortrait ? 9 : 10}px monospace`
+  ctx.fillText(`${__COMMIT_SHA__} · ${buildDate}`, cx, canvas.height - 12)
 }
 
 function drawHighScores() {
