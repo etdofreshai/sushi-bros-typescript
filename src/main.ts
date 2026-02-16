@@ -547,9 +547,9 @@ function update() {
   player.pos.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.pos.x))
   player.pos.y = Math.max(player.radius + 20, Math.min(canvas.height - player.radius - 20, player.pos.y))
 
-  // Camera: when player tries to go above the top 33%, scroll the world instead.
-  // Player never visually passes this threshold — the screen moves, not the player.
-  const scrollThreshold = canvas.height * 0.33
+  // Camera: player is clamped to the bottom 40% of the screen.
+  // When they'd move higher than 60% from the top, the camera scrolls instead.
+  const scrollThreshold = canvas.height * 0.60
   if (player.pos.y < scrollThreshold) {
     const diff = scrollThreshold - player.pos.y
     scrollY += diff
