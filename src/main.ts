@@ -92,8 +92,8 @@ interface Enemy {
   worldY: number; baseX: number; moveFactor: number
 }
 
-interface Sushi { pos: Vec2; vel: Vec2; life: number }
-interface EnemyProjectile { pos: Vec2; vel: Vec2; life: number }
+interface Sushi { pos: Vec2; vel: Vec2; life: number; worldX: number; worldY: number }
+interface EnemyProjectile { pos: Vec2; vel: Vec2; life: number; worldX: number; worldY: number }
 
 interface PoleSwing {
   angle: number; timer: number; maxTimer: number; radius: number
@@ -125,7 +125,6 @@ let score = 0
 let highScore = parseInt(localStorage.getItem('sushi-bros-hi') || '0')
 let lives = 3
 let scrollY = 0 // total scroll distance (increases)
-let scrollSpeed = 1.2
 let player: Player
 let sushis: Sushi[] = []
 let enemies: Enemy[] = []
@@ -134,9 +133,7 @@ let particles: Particle[] = []
 let poleSwing: PoleSwing | null = null
 let frameCount = 0
 let paused = false
-let lastEnemySpawn = 0
 let distance = 0
-let boatY = 0 // intro boat position
 
 // Terrain segments - each covers SEGMENT_H pixels of world height
 const SEGMENT_H = 200
@@ -376,10 +373,14 @@ function throwSushi() {
   const speed = 7
   // On touch use right-stick aim angle; on keyboard use facing direction
   const angle = (isTouchDevice && fireActive) ? shootAngle : player.facing
+  const spawnScreenX = player.pos.x + Math.cos(angle) * 16
+  const spawnScreenY = player.pos.y + Math.sin(angle) * 16
   sushis.push({
-    pos: { x: player.pos.x + Math.cos(angle) * 16, y: player.pos.y + Math.sin(angle) * 16 },
+    pos: { x: spawnScreenX, y: spawnScreenY },
     vel: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
-    life: 80
+    life: 80,
+    worldX: spawnScreenX,
+    worldY: scrollY + (canvas.height - spawnScreenY)
   })
 }
 
@@ -400,11 +401,10 @@ function startGame() {
   if (audioCtx.state === 'suspended') audioCtx.resume()
   state = 'playing'
   score = 0; lives = 3; distance = 0
-  scrollY = 0; scrollSpeed = 1.2
+  scrollY = 0
   sushis = []; enemies = []; enemyProjectiles = []; particles = []
   poleSwing = null
   nextEnemyWorldY = 400
-  boatY = canvas.height * 0.7
   resetPlayer()
 }
 
@@ -574,10 +574,13 @@ function update() {
     if (poleSwing.timer <= 0) poleSwing = null
   }
 
-  // Sushi projectiles
+  // Sushi projectiles (world space)
   for (let i = sushis.length - 1; i >= 0; i--) {
     const s = sushis[i]
-    s.pos.x += s.vel.x; s.pos.y += s.vel.y; s.life--
+    s.worldX += s.vel.x; s.worldY -= s.vel.y; s.life--
+    // Convert to screen space for rendering and collision
+    s.pos.x = s.worldX
+    s.pos.y = canvas.height - (s.worldY - scrollY)
     if (s.life <= 0 || s.pos.x < -20 || s.pos.x > canvas.width + 20 || s.pos.y < -20 || s.pos.y > canvas.height + 20)
       sushis.splice(i, 1)
   }
@@ -718,7 +721,9 @@ function updateEnemies() {
           enemyProjectiles.push({
             pos: { x: en.pos.x, y: en.pos.y },
             vel: { x: dx / d * 2.5, y: dy / d * 2.5 },
-            life: 100
+            life: 100,
+            worldX: en.pos.x,
+            worldY: scrollY + (canvas.height - en.pos.y)
           })
         }
       }
@@ -732,7 +737,10 @@ function updateEnemies() {
 function updateProjectiles() {
   for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
     const p = enemyProjectiles[i]
-    p.pos.x += p.vel.x; p.pos.y += p.vel.y; p.life--
+    p.worldX += p.vel.x; p.worldY -= p.vel.y; p.life--
+    // Convert to screen space
+    p.pos.x = p.worldX
+    p.pos.y = canvas.height - (p.worldY - scrollY)
     if (p.life <= 0 || p.pos.x < -10 || p.pos.x > canvas.width + 10 || p.pos.y < -10 || p.pos.y > canvas.height + 10)
       enemyProjectiles.splice(i, 1)
   }
@@ -774,55 +782,73 @@ function drawScrollingBackground() {
     }
   }
 
-  // Sand dots/pebbles
-  const sandSeed = Math.floor(scrollY / 50)
-  for (let i = 0; i < 20; i++) {
-    const hash = (sandSeed + i * 7919) % 10007
-    const worldY = (hash % 500) + scrollY - 100
-    if (getTerrainAt(worldY) === 'sand') {
-      const screenYp = canvas.height - (worldY - scrollY)
-      if (screenYp > 0 && screenYp < canvas.height) {
-        const sx = (hash * 3) % canvas.width
-        ctx.fillStyle = 'rgba(180,150,80,0.3)'
-        ctx.beginPath()
-        ctx.arc(sx, screenYp, 2, 0, Math.PI * 2)
-        ctx.fill()
+  // Sand dots/pebbles (stable world-space grid)
+  {
+    const gridSize = 50
+    const startRow = Math.floor(scrollY / gridSize) - 2
+    const endRow = Math.floor((scrollY + canvas.height) / gridSize) + 2
+    for (let row = startRow; row <= endRow; row++) {
+      for (let j = 0; j < 2; j++) {
+        const seed = (row * 7919 + j * 3571) & 0x7fffffff
+        const wY = row * gridSize + (seed % gridSize)
+        if (getTerrainAt(wY) === 'sand') {
+          const screenYp = canvas.height - (wY - scrollY)
+          if (screenYp > 0 && screenYp < canvas.height) {
+            const sx = ((seed * 3) & 0x7fffffff) % canvas.width
+            ctx.fillStyle = 'rgba(180,150,80,0.3)'
+            ctx.beginPath()
+            ctx.arc(sx, screenYp, 2, 0, Math.PI * 2)
+            ctx.fill()
+          }
+        }
       }
     }
   }
 
-  // Grass tufts
-  for (let i = 0; i < 30; i++) {
-    const hash = (sandSeed + i * 6271) % 10007
-    const worldY = (hash % 600) + scrollY - 100
-    if (getTerrainAt(worldY) === 'grass') {
-      const screenYp = canvas.height - (worldY - scrollY)
-      if (screenYp > 0 && screenYp < canvas.height) {
-        const sx = (hash * 5) % canvas.width
-        ctx.fillStyle = `rgba(20,${100 + (hash % 60)},20,0.4)`
-        ctx.beginPath()
-        ctx.arc(sx, screenYp, 3 + (hash % 3), 0, Math.PI * 2)
-        ctx.fill()
+  // Grass tufts (stable world-space grid)
+  {
+    const gridSize = 40
+    const startRow = Math.floor(scrollY / gridSize) - 2
+    const endRow = Math.floor((scrollY + canvas.height) / gridSize) + 2
+    for (let row = startRow; row <= endRow; row++) {
+      for (let j = 0; j < 2; j++) {
+        const seed = (row * 6271 + j * 4813) & 0x7fffffff
+        const wY = row * gridSize + (seed % gridSize)
+        if (getTerrainAt(wY) === 'grass') {
+          const screenYp = canvas.height - (wY - scrollY)
+          if (screenYp > 0 && screenYp < canvas.height) {
+            const sx = ((seed * 5) & 0x7fffffff) % canvas.width
+            ctx.fillStyle = `rgba(20,${100 + (seed % 60)},20,0.4)`
+            ctx.beginPath()
+            ctx.arc(sx, screenYp, 3 + (seed % 3), 0, Math.PI * 2)
+            ctx.fill()
+          }
+        }
       }
     }
   }
 
-  // Trees on grass (simple circles with trunk)
-  for (let i = 0; i < 10; i++) {
-    const hash = (Math.floor(scrollY / 300) + i * 4517) % 10007
-    const worldY = (hash % 800) + scrollY - 200
-    if (getTerrainAt(worldY) === 'grass') {
-      const screenYp = canvas.height - (worldY - scrollY)
-      if (screenYp > -20 && screenYp < canvas.height + 20) {
-        const sx = (hash * 7) % canvas.width
-        // Trunk
-        ctx.fillStyle = '#5a3a1a'
-        ctx.fillRect(sx - 3, screenYp - 5, 6, 12)
-        // Canopy
-        ctx.fillStyle = '#1a6a1a'
-        ctx.beginPath()
-        ctx.arc(sx, screenYp - 10, 10 + (hash % 5), 0, Math.PI * 2)
-        ctx.fill()
+  // Trees on grass (stable world-space grid)
+  {
+    const gridSize = 300
+    const startRow = Math.floor(scrollY / gridSize) - 1
+    const endRow = Math.floor((scrollY + canvas.height) / gridSize) + 1
+    for (let row = startRow; row <= endRow; row++) {
+      const seed = (row * 4517 + 9929) & 0x7fffffff
+      const wY = row * gridSize + (seed % gridSize)
+      if (getTerrainAt(wY) === 'grass') {
+        const screenYp = canvas.height - (wY - scrollY)
+        if (screenYp > -20 && screenYp < canvas.height + 20) {
+          const sx = ((seed * 7) & 0x7fffffff) % canvas.width
+          // Trunk
+          ctx.fillStyle = '#5a3a1a'
+          ctx.fillRect(sx - 3, screenYp - 5, 6, 12)
+          // Canopy
+          ctx.fillStyle = '#1a6a1a'
+          ctx.beginPath()
+          ctx.arc(sx, screenYp - 10, 10 + (seed % 5), 0, Math.PI * 2)
+          ctx.fill()
+        }
       }
     }
   }
