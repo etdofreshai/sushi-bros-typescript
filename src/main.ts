@@ -126,7 +126,14 @@ interface LevelConfig {
   terrainFn: (worldY: number) => TerrainType
   enemyWeights: [number, number, number] // crab, seagull, fisherman
   bgColor: string
+  spawnInterval: [number, number] // min, max gap between enemy rows
+  enemyHpScale: number // multiplier for enemy HP
+  shootTimerRange: [number, number] // fisherman shoot timer min, max
+  projectileSpeed: number // fisherman projectile speed
 }
+
+// Tree obstacles for Level 3
+interface TreeObstacle { worldX: number; worldY: number; radius: number }
 
 const LEVEL_CONFIGS: LevelConfig[] = [
   {
@@ -135,12 +142,23 @@ const LEVEL_CONFIGS: LevelConfig[] = [
     targetDistance: 2000,
     terrainFn: (worldY: number) => {
       const qd = Math.floor(worldY / 8) * 8
-      if (worldY < 1400) return 'water'
-      if (worldY < 1800) return hashY(qd) > (worldY - 1400) / 400 ? 'water' : 'sand'
+      // Mostly deep water with occasional sand bars
+      if (worldY < 600) return 'water'
+      if (worldY < 700 && hashY(qd) > 0.4) return 'sand' // small sandbar
+      if (worldY < 700) return 'water'
+      if (worldY < 1200) return 'water'
+      if (worldY < 1300 && hashY(qd) > 0.35) return 'sand' // another sandbar
+      if (worldY < 1300) return 'water'
+      if (worldY < 1700) return 'water'
+      if (worldY < 1850) return hashY(qd) > (worldY - 1700) / 300 ? 'water' : 'sand'
       return 'sand'
     },
-    enemyWeights: [0.5, 0.4, 0.1],
-    bgColor: '#0a1a3a'
+    enemyWeights: [0.55, 0.4, 0.05],
+    bgColor: '#0a1a3a',
+    spawnInterval: [140, 220],
+    enemyHpScale: 0.8,
+    shootTimerRange: [160, 240],
+    projectileSpeed: 2.0
   },
   {
     name: 'Beach Landing',
@@ -148,14 +166,18 @@ const LEVEL_CONFIGS: LevelConfig[] = [
     targetDistance: 2500,
     terrainFn: (worldY: number) => {
       const qd = Math.floor(worldY / 8) * 8
-      if (worldY < 400) return 'water'
-      if (worldY < 800) return hashY(qd) > (worldY - 400) / 400 ? 'water' : 'sand'
+      if (worldY < 300) return 'water'
+      if (worldY < 600) return hashY(qd) > (worldY - 300) / 300 ? 'water' : 'sand'
       if (worldY < 1800) return 'sand'
-      if (worldY < 2200) return hashY(qd) > (worldY - 1800) / 400 ? 'sand' : 'grass'
+      if (worldY < 2100) return hashY(qd) > (worldY - 1800) / 300 ? 'sand' : 'grass'
       return 'grass'
     },
-    enemyWeights: [0.4, 0.3, 0.3],
-    bgColor: '#1a1a0a'
+    enemyWeights: [0.35, 0.30, 0.35],
+    bgColor: '#1a1a0a',
+    spawnInterval: [110, 170],
+    enemyHpScale: 1.0,
+    shootTimerRange: [120, 180],
+    projectileSpeed: 2.5
   },
   {
     name: 'Island Interior',
@@ -163,12 +185,16 @@ const LEVEL_CONFIGS: LevelConfig[] = [
     targetDistance: 3000,
     terrainFn: (worldY: number) => {
       const qd = Math.floor(worldY / 8) * 8
-      if (worldY < 300) return 'sand'
-      if (worldY < 600) return hashY(qd) > (worldY - 300) / 300 ? 'sand' : 'grass'
+      if (worldY < 200) return 'sand'
+      if (worldY < 450) return hashY(qd) > (worldY - 200) / 250 ? 'sand' : 'grass'
       return 'grass'
     },
-    enemyWeights: [0.3, 0.3, 0.4],
-    bgColor: '#0a1a0a'
+    enemyWeights: [0.33, 0.33, 0.34],
+    bgColor: '#0a1a0a',
+    spawnInterval: [70, 120],
+    enemyHpScale: 1.4,
+    shootTimerRange: [80, 130],
+    projectileSpeed: 3.2
   }
 ]
 
@@ -204,6 +230,8 @@ let enemies: Enemy[] = []
 let enemyProjectiles: EnemyProjectile[] = []
 let particles: Particle[] = []
 let poleSwing: PoleSwing | null = null
+let treeObstacles: TreeObstacle[] = []
+let nextTreeWorldY = 0
 let frameCount = 0
 let paused = false
 let distance = 0
@@ -513,6 +541,8 @@ function beginLevel(level: number) {
   sushis = []; enemies = []; enemyProjectiles = []; particles = []
   poleSwing = null
   nextEnemyWorldY = 400
+  treeObstacles = []
+  nextTreeWorldY = 0
   resetPlayer()
   state = 'levelIntro'
   levelIntroTimer = 120 // ~2 seconds at 60fps
@@ -557,11 +587,11 @@ function spawnEnemiesAhead() {
   // Spawn enemies in world space ahead of the camera
   const cameraTopWorldY = scrollY + canvas.height + 200 // a bit above screen
   while (nextEnemyWorldY < cameraTopWorldY) {
+    const lvlCfg = LEVEL_CONFIGS[currentLevel]
     // Spawn 1-3 enemies per "row"
     const count = 1 + Math.floor(Math.random() * 2)
     for (let c = 0; c < count; c++) {
       const types: EnemyType[] = ['crab', 'seagull', 'fisherman']
-      const lvlCfg = LEVEL_CONFIGS[currentLevel]
       const diff = Math.min(nextEnemyWorldY / 5000, 1)
       const weights = lvlCfg ? [
         lvlCfg.enemyWeights[0] + (1 - diff) * 0.2,
@@ -580,17 +610,18 @@ function spawnEnemiesAhead() {
       }
 
       const x = 30 + Math.random() * (canvas.width - 60)
-      // Movement scales with distance: static early, very slow later
-      // No downward velocity — they don't come at you
-      const moveFactor = Math.min(nextEnemyWorldY / 8000, 0.6) // max 60% of original speed
+      const moveFactor = Math.min(nextEnemyWorldY / 8000, 0.6)
+      const hpScale = lvlCfg ? lvlCfg.enemyHpScale : 1
+      const baseHp = type === 'fisherman' ? 3 : type === 'seagull' ? 1 : 2
+      const stRange = lvlCfg ? lvlCfg.shootTimerRange : [80, 120] as [number, number]
       const enemy: Enemy = {
-        pos: { x, y: 0 }, // screen Y computed from worldY each frame
+        pos: { x, y: 0 },
         vel: { x: 0, y: 0 },
         type,
-        hp: type === 'fisherman' ? 3 : type === 'seagull' ? 1 : 2,
+        hp: Math.max(1, Math.round(baseHp * hpScale)),
         radius: type === 'fisherman' ? 16 : type === 'seagull' ? 12 : 14,
-        timer: Math.random() * 200, // randomize animation phase
-        shootTimer: 80 + Math.random() * 120,
+        timer: Math.random() * 200,
+        shootTimer: stRange[0] + Math.random() * (stRange[1] - stRange[0]),
         animFrame: 0,
         worldY: nextEnemyWorldY,
         baseX: x,
@@ -602,8 +633,29 @@ function spawnEnemiesAhead() {
       }
       enemies.push(enemy)
     }
-    nextEnemyWorldY += 100 + Math.random() * 150
+    const si = lvlCfg ? lvlCfg.spawnInterval : [100, 150] as [number, number]
+    nextEnemyWorldY += si[0] + Math.random() * (si[1] - si[0])
   }
+}
+
+function spawnTreesAhead() {
+  if (currentLevel !== 2) return // Only Level 3 (index 2) has collision trees
+  const cameraTopWorldY = scrollY + canvas.height + 300
+  while (nextTreeWorldY < cameraTopWorldY) {
+    if (getTerrainAt(nextTreeWorldY) === 'grass') {
+      // 2-4 trees per row
+      const count = 2 + Math.floor(Math.random() * 3)
+      for (let c = 0; c < count; c++) {
+        const seed = ((nextTreeWorldY * 7919 + c * 3571) & 0x7fffffff)
+        const tx = 20 + (seed % (canvas.width - 40))
+        treeObstacles.push({ worldX: tx, worldY: nextTreeWorldY + (seed % 60), radius: 12 })
+      }
+    }
+    nextTreeWorldY += 80 + Math.floor(Math.random() * 60)
+  }
+  // Cull trees far behind camera
+  const cullY = scrollY - 200
+  treeObstacles = treeObstacles.filter(t => t.worldY > cullY)
 }
 
 function spawnParticles(x: number, y: number, count: number, colors: string[]) {
@@ -737,8 +789,29 @@ function update() {
       sushis.splice(i, 1)
   }
 
-  // Spawn enemies ahead in world space
+  // Spawn enemies and trees ahead
   spawnEnemiesAhead()
+  spawnTreesAhead()
+
+  // Tree collision (Level 3)
+  if (currentLevel === 2 && player.visible) {
+    const playerWX = player.pos.x
+    const playerWY = scrollY + (canvas.height - player.pos.y)
+    for (const tree of treeObstacles) {
+      const dx = playerWX - tree.worldX
+      const dy = playerWY - tree.worldY
+      const dist = Math.hypot(dx, dy)
+      const minDist = player.radius + tree.radius
+      if (dist < minDist && dist > 0) {
+        // Push player out
+        const nx = dx / dist, ny = dy / dist
+        const pushWX = tree.worldX + nx * minDist
+        const pushWY = tree.worldY + ny * minDist
+        player.pos.x = pushWX
+        player.pos.y = canvas.height - (pushWY - scrollY)
+      }
+    }
+  }
 
   updateEnemies()
 
@@ -866,13 +939,16 @@ function updateEnemies() {
     if (en.type === 'fisherman' && player.visible && en.pos.y > -20 && en.pos.y < canvas.height + 20) {
       en.shootTimer--
       if (en.shootTimer <= 0) {
-        en.shootTimer = 120 + Math.random() * 80
+        const lvlCfg = LEVEL_CONFIGS[currentLevel]
+        const stR = lvlCfg ? lvlCfg.shootTimerRange : [120, 200] as [number, number]
+        en.shootTimer = stR[0] + Math.random() * (stR[1] - stR[0])
         const dx = player.pos.x - en.pos.x, dy = player.pos.y - en.pos.y
         const d = Math.hypot(dx, dy)
-        if (d > 0 && d < 300) { // only shoot if player is nearby
+        const pSpeed = lvlCfg ? lvlCfg.projectileSpeed : 2.5
+        if (d > 0 && d < 300) {
           enemyProjectiles.push({
             pos: { x: en.pos.x, y: en.pos.y },
-            vel: { x: dx / d * 2.5, y: dy / d * 2.5 },
+            vel: { x: dx / d * pSpeed, y: dy / d * pSpeed },
             life: 100,
             worldX: en.pos.x,
             worldY: scrollY + (canvas.height - en.pos.y)
@@ -934,54 +1010,11 @@ function drawScrollingBackground() {
     }
   }
 
-  // Sand dots/pebbles (stable world-space grid)
-  {
-    const gridSize = 50
-    const startRow = Math.floor(scrollY / gridSize) - 2
-    const endRow = Math.floor((scrollY + canvas.height) / gridSize) + 2
-    for (let row = startRow; row <= endRow; row++) {
-      for (let j = 0; j < 2; j++) {
-        const seed = (row * 7919 + j * 3571) & 0x7fffffff
-        const wY = row * gridSize + (seed % gridSize)
-        if (getTerrainAt(wY) === 'sand') {
-          const screenYp = canvas.height - (wY - scrollY)
-          if (screenYp > 0 && screenYp < canvas.height) {
-            const sx = ((seed * 3) & 0x7fffffff) % canvas.width
-            ctx.fillStyle = 'rgba(180,150,80,0.3)'
-            ctx.beginPath()
-            ctx.arc(sx, screenYp, 2, 0, Math.PI * 2)
-            ctx.fill()
-          }
-        }
-      }
-    }
-  }
+  // ─── Level-specific decorations ───
+  drawLevelDecorations()
 
-  // Grass tufts (stable world-space grid)
-  {
-    const gridSize = 40
-    const startRow = Math.floor(scrollY / gridSize) - 2
-    const endRow = Math.floor((scrollY + canvas.height) / gridSize) + 2
-    for (let row = startRow; row <= endRow; row++) {
-      for (let j = 0; j < 2; j++) {
-        const seed = (row * 6271 + j * 4813) & 0x7fffffff
-        const wY = row * gridSize + (seed % gridSize)
-        if (getTerrainAt(wY) === 'grass') {
-          const screenYp = canvas.height - (wY - scrollY)
-          if (screenYp > 0 && screenYp < canvas.height) {
-            const sx = ((seed * 5) & 0x7fffffff) % canvas.width
-            ctx.fillStyle = `rgba(20,${100 + (seed % 60)},20,0.4)`
-            ctx.beginPath()
-            ctx.arc(sx, screenYp, 3 + (seed % 3), 0, Math.PI * 2)
-            ctx.fill()
-          }
-        }
-      }
-    }
-  }
-
-  // Trees on grass (stable world-space grid)
-  {
+  // Trees on grass (visual-only for levels 1 & 2; level 3 uses collision trees)
+  if (currentLevel !== 2) {
     const gridSize = 300
     const startRow = Math.floor(scrollY / gridSize) - 1
     const endRow = Math.floor((scrollY + canvas.height) / gridSize) + 1
@@ -992,10 +1025,8 @@ function drawScrollingBackground() {
         const screenYp = canvas.height - (wY - scrollY)
         if (screenYp > -20 && screenYp < canvas.height + 20) {
           const sx = ((seed * 7) & 0x7fffffff) % canvas.width
-          // Trunk
           ctx.fillStyle = '#5a3a1a'
           ctx.fillRect(sx - 3, screenYp - 5, 6, 12)
-          // Canopy
           ctx.fillStyle = '#1a6a1a'
           ctx.beginPath()
           ctx.arc(sx, screenYp - 10, 10 + (seed % 5), 0, Math.PI * 2)
@@ -1005,14 +1036,213 @@ function drawScrollingBackground() {
     }
   }
 
-  // Boats on water (near start)
-  if (scrollY < 1500) {
-    for (let i = 0; i < 3; i++) {
-      const bWorldY = 200 + i * 250
+  // Level 3: Draw collision trees
+  if (currentLevel === 2) {
+    for (const tree of treeObstacles) {
+      const screenYp = canvas.height - (tree.worldY - scrollY)
+      if (screenYp > -30 && screenYp < canvas.height + 30) {
+        // Trunk
+        ctx.fillStyle = '#4a2a0a'
+        ctx.fillRect(tree.worldX - 4, screenYp - 4, 8, 16)
+        // Canopy (larger, denser for jungle feel)
+        ctx.fillStyle = '#0d5a0d'
+        ctx.beginPath()
+        ctx.arc(tree.worldX, screenYp - 10, tree.radius, 0, Math.PI * 2)
+        ctx.fill()
+        // Highlight
+        ctx.fillStyle = 'rgba(30,120,30,0.5)'
+        ctx.beginPath()
+        ctx.arc(tree.worldX - 3, screenYp - 13, tree.radius * 0.6, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+  }
+
+  // Boats on water (Level 1 scenery)
+  if (currentLevel === 0 && scrollY < 1800) {
+    for (let i = 0; i < 5; i++) {
+      const bWorldY = 150 + i * 350
       const bScreenY = canvas.height - (bWorldY - scrollY)
       if (bScreenY > -30 && bScreenY < canvas.height + 30) {
-        const bx = 80 + i * (canvas.width - 160) / 2
+        const bx = 60 + ((i * 137) % (canvas.width - 120))
         drawBoat(bx, bScreenY)
+      }
+    }
+  }
+}
+
+function drawLevelDecorations() {
+  const gridSize = 60
+  const startRow = Math.floor(scrollY / gridSize) - 2
+  const endRow = Math.floor((scrollY + canvas.height) / gridSize) + 2
+
+  if (currentLevel === 0) {
+    // Ocean: Coral, seaweed, floating debris, boat wakes
+    for (let row = startRow; row <= endRow; row++) {
+      for (let j = 0; j < 3; j++) {
+        const seed = (row * 8123 + j * 2917 + 1) & 0x7fffffff
+        const wY = row * gridSize + (seed % gridSize)
+        const terrain = getTerrainAt(wY)
+        const screenYp = canvas.height - (wY - scrollY)
+        if (screenYp < -10 || screenYp > canvas.height + 10) continue
+        const sx = ((seed * 3) & 0x7fffffff) % canvas.width
+
+        if (terrain === 'water') {
+          const kind = seed % 4
+          if (kind === 0) {
+            // Coral
+            ctx.fillStyle = `rgba(${180 + seed % 60},${80 + seed % 40},${100 + seed % 50},0.4)`
+            ctx.beginPath()
+            ctx.arc(sx, screenYp, 4 + seed % 3, 0, Math.PI * 2); ctx.fill()
+            ctx.beginPath()
+            ctx.arc(sx + 5, screenYp - 3, 3, 0, Math.PI * 2); ctx.fill()
+          } else if (kind === 1) {
+            // Seaweed
+            ctx.strokeStyle = 'rgba(30,140,60,0.35)'; ctx.lineWidth = 2
+            const sway = Math.sin(frameCount * 0.03 + sx * 0.1) * 4
+            ctx.beginPath()
+            ctx.moveTo(sx, screenYp)
+            ctx.quadraticCurveTo(sx + sway, screenYp - 8, sx + sway * 0.5, screenYp - 16)
+            ctx.stroke()
+          } else if (kind === 2) {
+            // Floating debris
+            ctx.fillStyle = 'rgba(120,90,50,0.25)'
+            ctx.fillRect(sx - 4, screenYp - 1, 8, 2)
+          } else {
+            // Bubble
+            ctx.strokeStyle = 'rgba(150,200,255,0.2)'; ctx.lineWidth = 1
+            ctx.beginPath()
+            ctx.arc(sx, screenYp, 2, 0, Math.PI * 2); ctx.stroke()
+          }
+        } else if (terrain === 'sand') {
+          // Sand pebbles
+          ctx.fillStyle = 'rgba(180,150,80,0.3)'
+          ctx.beginPath(); ctx.arc(sx, screenYp, 2, 0, Math.PI * 2); ctx.fill()
+        }
+      }
+    }
+  } else if (currentLevel === 1) {
+    // Beach: Shells, starfish, beach umbrellas, driftwood, tide pools
+    for (let row = startRow; row <= endRow; row++) {
+      for (let j = 0; j < 3; j++) {
+        const seed = (row * 5431 + j * 3719 + 2) & 0x7fffffff
+        const wY = row * gridSize + (seed % gridSize)
+        const terrain = getTerrainAt(wY)
+        const screenYp = canvas.height - (wY - scrollY)
+        if (screenYp < -10 || screenYp > canvas.height + 10) continue
+        const sx = ((seed * 3) & 0x7fffffff) % canvas.width
+
+        if (terrain === 'water') {
+          // Water: seaweed & foam
+          ctx.fillStyle = 'rgba(200,230,255,0.15)'
+          ctx.beginPath(); ctx.arc(sx, screenYp, 3, 0, Math.PI * 2); ctx.fill()
+        } else if (terrain === 'sand') {
+          const kind = seed % 5
+          if (kind === 0) {
+            // Shell (spiral)
+            ctx.fillStyle = 'rgba(230,210,180,0.5)'
+            ctx.beginPath(); ctx.arc(sx, screenYp, 3, 0, Math.PI * 2); ctx.fill()
+            ctx.strokeStyle = 'rgba(180,160,130,0.4)'; ctx.lineWidth = 0.5
+            ctx.beginPath(); ctx.arc(sx, screenYp, 2, 0, Math.PI); ctx.stroke()
+          } else if (kind === 1) {
+            // Starfish
+            ctx.fillStyle = 'rgba(220,120,80,0.45)'
+            for (let a = 0; a < 5; a++) {
+              const angle = (a / 5) * Math.PI * 2 - Math.PI / 2
+              ctx.beginPath()
+              ctx.moveTo(sx, screenYp)
+              ctx.lineTo(sx + Math.cos(angle) * 5, screenYp + Math.sin(angle) * 5)
+              ctx.lineTo(sx + Math.cos(angle + 0.3) * 2, screenYp + Math.sin(angle + 0.3) * 2)
+              ctx.fill()
+            }
+          } else if (kind === 2) {
+            // Driftwood
+            ctx.fillStyle = 'rgba(140,110,70,0.35)'
+            ctx.save(); ctx.translate(sx, screenYp); ctx.rotate((seed % 314) / 100)
+            ctx.fillRect(-6, -1, 12, 2); ctx.restore()
+          } else if (kind === 3) {
+            // Tide pool
+            ctx.fillStyle = 'rgba(40,80,120,0.25)'
+            ctx.beginPath(); ctx.ellipse(sx, screenYp, 6, 4, 0, 0, Math.PI * 2); ctx.fill()
+          } else {
+            // Sand pebble
+            ctx.fillStyle = 'rgba(180,150,80,0.3)'
+            ctx.beginPath(); ctx.arc(sx, screenYp, 2, 0, Math.PI * 2); ctx.fill()
+          }
+        } else if (terrain === 'grass') {
+          // Grass tufts
+          ctx.fillStyle = `rgba(20,${100 + seed % 60},20,0.4)`
+          ctx.beginPath(); ctx.arc(sx, screenYp, 3 + seed % 3, 0, Math.PI * 2); ctx.fill()
+        }
+      }
+    }
+    // Beach umbrellas (sparse, big grid)
+    {
+      const uGrid = 400
+      const uStart = Math.floor(scrollY / uGrid) - 1
+      const uEnd = Math.floor((scrollY + canvas.height) / uGrid) + 1
+      for (let row = uStart; row <= uEnd; row++) {
+        const seed = (row * 9371 + 4447) & 0x7fffffff
+        const wY = row * uGrid + 100 + (seed % 200)
+        if (getTerrainAt(wY) !== 'sand') continue
+        const screenYp = canvas.height - (wY - scrollY)
+        if (screenYp < -20 || screenYp > canvas.height + 20) continue
+        const sx = ((seed * 7) & 0x7fffffff) % canvas.width
+        // Pole
+        ctx.fillStyle = 'rgba(160,130,90,0.5)'
+        ctx.fillRect(sx - 1, screenYp - 12, 2, 14)
+        // Umbrella top
+        const colors = ['rgba(220,60,60,0.4)', 'rgba(60,60,220,0.4)', 'rgba(220,180,40,0.4)']
+        ctx.fillStyle = colors[seed % 3]
+        ctx.beginPath(); ctx.arc(sx, screenYp - 12, 10, Math.PI, 0); ctx.fill()
+      }
+    }
+  } else if (currentLevel === 2) {
+    // Island: Flowers, mushrooms, rocks, bushes
+    for (let row = startRow; row <= endRow; row++) {
+      for (let j = 0; j < 4; j++) {
+        const seed = (row * 6733 + j * 4091 + 3) & 0x7fffffff
+        const wY = row * gridSize + (seed % gridSize)
+        const terrain = getTerrainAt(wY)
+        const screenYp = canvas.height - (wY - scrollY)
+        if (screenYp < -10 || screenYp > canvas.height + 10) continue
+        const sx = ((seed * 3) & 0x7fffffff) % canvas.width
+
+        if (terrain === 'grass') {
+          const kind = seed % 5
+          if (kind === 0) {
+            // Flower
+            const fColors = ['rgba(255,100,100,0.6)', 'rgba(255,200,50,0.6)', 'rgba(200,100,255,0.6)', 'rgba(255,150,200,0.6)']
+            ctx.fillStyle = fColors[seed % fColors.length]
+            ctx.beginPath(); ctx.arc(sx, screenYp, 3, 0, Math.PI * 2); ctx.fill()
+            ctx.fillStyle = 'rgba(255,230,100,0.7)'
+            ctx.beginPath(); ctx.arc(sx, screenYp, 1.5, 0, Math.PI * 2); ctx.fill()
+          } else if (kind === 1) {
+            // Mushroom
+            ctx.fillStyle = 'rgba(200,180,150,0.4)'
+            ctx.fillRect(sx - 1, screenYp, 2, 4)
+            ctx.fillStyle = 'rgba(200,50,50,0.45)'
+            ctx.beginPath(); ctx.arc(sx, screenYp, 4, Math.PI, 0); ctx.fill()
+            // Spots
+            ctx.fillStyle = 'rgba(255,255,255,0.3)'
+            ctx.beginPath(); ctx.arc(sx - 1, screenYp - 1, 1, 0, Math.PI * 2); ctx.fill()
+          } else if (kind === 2) {
+            // Rock
+            ctx.fillStyle = 'rgba(120,115,105,0.45)'
+            ctx.beginPath(); ctx.ellipse(sx, screenYp, 5, 3, 0, 0, Math.PI * 2); ctx.fill()
+          } else if (kind === 3) {
+            // Bush
+            ctx.fillStyle = 'rgba(25,90,25,0.4)'
+            ctx.beginPath(); ctx.arc(sx, screenYp, 5 + seed % 3, 0, Math.PI * 2); ctx.fill()
+          } else {
+            // Dense grass tuft
+            ctx.fillStyle = `rgba(15,${90 + seed % 50},15,0.5)`
+            ctx.beginPath(); ctx.arc(sx, screenYp, 3 + seed % 3, 0, Math.PI * 2); ctx.fill()
+          }
+        } else if (terrain === 'sand') {
+          ctx.fillStyle = 'rgba(180,150,80,0.3)'
+          ctx.beginPath(); ctx.arc(sx, screenYp, 2, 0, Math.PI * 2); ctx.fill()
+        }
       }
     }
   }
