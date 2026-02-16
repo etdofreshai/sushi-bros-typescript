@@ -514,16 +514,16 @@ const LEVEL_CONFIGS: LevelConfig[] = [
     subtitle: 'Navigate the treacherous waters!',
     targetDistance: 2000,
     terrainFn: (worldY: number) => {
-      const qd = Math.floor(worldY / 8) * 8
-      // Mostly deep water with occasional sand bars
-      if (worldY < 600) return 'water'
-      if (worldY < 700 && hashY(qd) > 0.4) return 'sand' // small sandbar
-      if (worldY < 700) return 'water'
-      if (worldY < 1200) return 'water'
-      if (worldY < 1300 && hashY(qd) > 0.35) return 'sand' // another sandbar
-      if (worldY < 1300) return 'water'
-      if (worldY < 1700) return 'water'
-      if (worldY < 1850) return hashY(qd) > (worldY - 1700) / 300 ? 'water' : 'sand'
+      // Open ocean for most of the level, then a wavy shoreline near the end
+      const shoreStart = 1650
+      if (worldY < shoreStart) return 'water'
+      // Wavy shoreline using overlapping sine waves for organic look
+      // X-position varies per row to create the wavy edge
+      const wave = Math.sin(worldY * 0.03) * 40
+        + Math.sin(worldY * 0.071 + 2.0) * 25
+        + Math.sin(worldY * 0.15 + 5.0) * 12
+      const shoreEdge = shoreStart + 80 + wave
+      if (worldY < shoreEdge) return 'water'
       return 'sand'
     },
     enemyWeights: [0.55, 0.4, 0.05],
