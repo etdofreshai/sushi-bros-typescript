@@ -1,5 +1,7 @@
 import './style.css'
 
+declare const __BUILD_DATE__: string
+
 // ─── Canvas Setup ───
 const canvas = document.createElement('canvas')
 document.getElementById('app')!.appendChild(canvas)
@@ -2863,6 +2865,19 @@ function drawControlsScreen() {
   }
   ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
   ctx.fillText(isTouchDevice ? 'TAP TO GO BACK' : 'PRESS ESC OR ENTER', cx, canvas.height * 0.85)
+
+  // Build info
+  const infoFs = isPortrait ? 9 : 10
+  ctx.font = `${infoFs}px monospace`
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'
+  const infoLines = [
+    'Owner: etdofreshai | Repo: sushi-bros-typescript',
+    'Branch: main | Commit: e700288',
+    `Build: ${__BUILD_DATE__}`,
+  ]
+  for (let i = 0; i < infoLines.length; i++) {
+    ctx.fillText(infoLines[i], cx, canvas.height * 0.90 + i * (infoFs + 4))
+  }
 }
 
 function drawLevelIntro() {
