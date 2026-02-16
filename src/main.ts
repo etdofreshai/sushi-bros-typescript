@@ -538,11 +538,23 @@ const LEVEL_CONFIGS: LevelConfig[] = [
     subtitle: 'Storm the sandy shores!',
     targetDistance: 2500,
     terrainFn: (worldY: number) => {
-      const qd = Math.floor(worldY / 8) * 8
-      if (worldY < 300) return 'water'
-      if (worldY < 600) return hashY(qd) > (worldY - 300) / 300 ? 'water' : 'sand'
+      // Zone 1: Open water (y=0..600)
+      if (worldY < 600) return 'water'
+      // Wavy shoreline transition (water → sand) around y=600-800
+      const shoreWave = Math.sin(worldY * 0.025) * 45
+        + Math.sin(worldY * 0.063 + 1.7) * 30
+        + Math.sin(worldY * 0.14 + 4.2) * 15
+      const shoreEdge = 700 + shoreWave
+      if (worldY < shoreEdge) return 'water'
+      // Zone 2: Solid sand/beach (up to ~1800-2000)
       if (worldY < 1800) return 'sand'
-      if (worldY < 2100) return hashY(qd) > (worldY - 1800) / 300 ? 'sand' : 'grass'
+      // Wavy transition (sand → grass) around y=1800-2000
+      const grassWave = Math.sin(worldY * 0.028) * 40
+        + Math.sin(worldY * 0.072 + 3.1) * 28
+        + Math.sin(worldY * 0.16 + 1.5) * 12
+      const grassEdge = 1900 + grassWave
+      if (worldY < grassEdge) return 'sand'
+      // Zone 3: Solid grass to boss
       return 'grass'
     },
     enemyWeights: [0.35, 0.30, 0.35],
