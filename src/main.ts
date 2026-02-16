@@ -82,6 +82,50 @@ function sfxSplash() {
   src.start(t); src.stop(t + 0.4)
 }
 
+function sfxBossWarning() {
+  const t = audioCtx.currentTime
+  // Alarm-like rising tone
+  for (let i = 0; i < 3; i++) {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain()
+    o.connect(g); g.connect(audioCtx.destination)
+    o.type = 'sawtooth'
+    const start = t + i * 0.25
+    o.frequency.setValueAtTime(200, start)
+    o.frequency.exponentialRampToValueAtTime(600, start + 0.2)
+    g.gain.setValueAtTime(0.1, start)
+    g.gain.exponentialRampToValueAtTime(0.001, start + 0.22)
+    o.start(start); o.stop(start + 0.22)
+  }
+}
+
+function sfxBossDefeat() {
+  const t = audioCtx.currentTime
+  // Big explosion + descending boom
+  const noiseLen = audioCtx.sampleRate * 0.8
+  const noiseBuf = audioCtx.createBuffer(1, noiseLen, audioCtx.sampleRate)
+  const nd = noiseBuf.getChannelData(0)
+  for (let i = 0; i < noiseLen; i++) nd[i] = (Math.random() * 2 - 1)
+  const src = audioCtx.createBufferSource(); src.buffer = noiseBuf
+  const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'
+  lp.frequency.setValueAtTime(800, t); lp.frequency.exponentialRampToValueAtTime(40, t + 0.8)
+  const g = audioCtx.createGain()
+  g.gain.setValueAtTime(0.2, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.8)
+  src.connect(lp); lp.connect(g); g.connect(audioCtx.destination)
+  src.start(t); src.stop(t + 0.8)
+  // Victory chime
+  const notes = [523, 659, 784, 1047]
+  for (let i = 0; i < notes.length; i++) {
+    const o = audioCtx.createOscillator(), g2 = audioCtx.createGain()
+    o.connect(g2); g2.connect(audioCtx.destination)
+    o.type = 'sine'
+    const ns = t + 0.3 + i * 0.15
+    o.frequency.setValueAtTime(notes[i], ns)
+    g2.gain.setValueAtTime(0.08, ns)
+    g2.gain.exponentialRampToValueAtTime(0.001, ns + 0.4)
+    o.start(ns); o.stop(ns + 0.4)
+  }
+}
+
 // ─── Types ───
 interface Vec2 { x: number; y: number }
 
@@ -105,6 +149,52 @@ interface Player {
   pos: Vec2; vel: Vec2; radius: number; facing: number
   invulnTimer: number; visible: boolean; respawnTimer: number
 }
+
+// ─── Boss Types ───
+type BossPhasePattern = 'ink_spread' | 'tentacle_sweep' | 'charge' | 'spawn_minions' | 'cast_nets' | 'throw_hooks' | 'summon_seagulls'
+
+interface BossPhase {
+  patterns: BossPhasePattern[]
+  attackInterval: number // frames between attacks
+}
+
+interface BossProjectile {
+  pos: Vec2; vel: Vec2; life: number; worldX: number; worldY: number
+  type: 'ink' | 'hook' | 'net'
+  netTimer?: number // for nets: time player has stood in it
+  netRadius?: number
+}
+
+interface TentacleSweep {
+  x: number; y: number; width: number; height: number; life: number; velY: number
+}
+
+interface Boss {
+  name: string
+  pos: Vec2
+  worldY: number
+  hp: number
+  maxHp: number
+  radius: number
+  currentPhase: number
+  phases: BossPhase[]
+  phaseTimer: number
+  attackTimer: number
+  animFrame: number
+  defeated: boolean
+  defeatTimer: number
+  // Type-specific
+  bossType: 'octopus' | 'crab_king' | 'fisherman'
+  // Crab king specifics
+  chargeVelX?: number
+  chargeDir?: number
+  shieldTimer?: number
+  // Fisherman specifics
+  // General
+  flashTimer: number
+}
+
+type BossFightState = 'none' | 'warning' | 'clearing' | 'fighting' | 'defeated'
 
 // ─── Terrain ───
 type TerrainType = 'water' | 'sand' | 'grass'
@@ -238,6 +328,14 @@ let distance = 0
 let currentLevel = 0 // 0-indexed
 let levelIntroTimer = 0
 let menuSelection = 0
+// Boss state
+let bossFightState: BossFightState = 'none'
+let currentBoss: Boss | null = null
+let bossWarningTimer = 0
+let bossClearTimer = 0
+let bossProjectiles: BossProjectile[] = []
+let tentacleSweeps: TentacleSweep[] = []
+let bossScrollYLock = 0
 const MENU_ITEMS = ['Start Game', 'High Scores', 'Controls']
 
 // Terrain segments - each covers SEGMENT_H pixels of world height
@@ -543,6 +641,12 @@ function beginLevel(level: number) {
   nextEnemyWorldY = 400
   treeObstacles = []
   nextTreeWorldY = 0
+  bossFightState = 'none'
+  currentBoss = null
+  bossWarningTimer = 0
+  bossClearTimer = 0
+  bossProjectiles = []
+  tentacleSweeps = []
   resetPlayer()
   state = 'levelIntro'
   levelIntroTimer = 120 // ~2 seconds at 60fps
@@ -741,22 +845,76 @@ function update() {
   // Camera: player is clamped to the bottom 40% of the screen.
   // When they'd move higher than 60% from the top, the camera scrolls instead.
   const scrollThreshold = canvas.height * 0.60
-  if (player.pos.y < scrollThreshold) {
-    const diff = scrollThreshold - player.pos.y
-    scrollY += diff
-    player.pos.y = scrollThreshold
+  if (bossFightState === 'none') {
+    if (player.pos.y < scrollThreshold) {
+      const diff = scrollThreshold - player.pos.y
+      scrollY += diff
+      player.pos.y = scrollThreshold
+    }
+    distance = Math.floor(scrollY)
+  } else {
+    // During boss, lock camera but clamp player
+    if (player.pos.y < player.radius + 20) player.pos.y = player.radius + 20
   }
-  distance = Math.floor(scrollY)
 
-  // Level completion check
+  // Boss trigger: when distance reaches target, start boss sequence
   const levelCfg = LEVEL_CONFIGS[currentLevel]
-  if (levelCfg && distance >= levelCfg.targetDistance) {
-    if (currentLevel >= LEVEL_CONFIGS.length - 1) {
-      saveHighScore(score, currentLevel + 1)
-      state = 'victory'
-      return
-    } else {
-      state = 'levelComplete'
+  if (levelCfg && distance >= levelCfg.targetDistance && bossFightState === 'none') {
+    bossFightState = 'warning'
+    bossWarningTimer = 120 // 2 seconds
+    bossScrollYLock = scrollY
+    sfxBossWarning()
+  }
+
+  // Boss fight state machine
+  if (bossFightState === 'warning') {
+    bossWarningTimer--
+    if (bossWarningTimer <= 0) {
+      bossFightState = 'clearing'
+      bossClearTimer = 60
+    }
+  }
+  if (bossFightState === 'clearing') {
+    bossClearTimer--
+    // Clear enemies gradually
+    if (enemies.length > 0 && bossClearTimer % 5 === 0) {
+      const en = enemies.pop()!
+      spawnParticles(en.pos.x, en.pos.y, 6, ['#ffffff', '#aaaaaa'])
+    }
+    if (bossClearTimer <= 0 || enemies.length === 0) {
+      enemies = []
+      enemyProjectiles = []
+      bossFightState = 'fighting'
+      currentBoss = createBoss(currentLevel)
+    }
+  }
+  if (bossFightState === 'fighting' && currentBoss) {
+    // Lock camera
+    scrollY = bossScrollYLock
+    distance = Math.floor(scrollY)
+    updateBoss()
+  }
+  if (bossFightState === 'defeated' && currentBoss) {
+    currentBoss.defeatTimer--
+    // Explosion particles during defeat
+    if (currentBoss.defeatTimer % 8 === 0) {
+      const bx = currentBoss.pos.x + (Math.random() - 0.5) * 60
+      const by = currentBoss.pos.y + (Math.random() - 0.5) * 60
+      spawnParticles(bx, by, 8, ['#ff4444', '#ffaa00', '#ffff44', '#ffffff'])
+    }
+    if (currentBoss.defeatTimer <= 0) {
+      const bonuses = [500, 1000, 2000]
+      score += bonuses[currentLevel] || 500
+      if (currentLevel >= LEVEL_CONFIGS.length - 1) {
+        saveHighScore(score, currentLevel + 1)
+        state = 'victory'
+      } else {
+        state = 'levelComplete'
+      }
+      bossFightState = 'none'
+      currentBoss = null
+      bossProjectiles = []
+      tentacleSweeps = []
       return
     }
   }
@@ -789,9 +947,11 @@ function update() {
       sushis.splice(i, 1)
   }
 
-  // Spawn enemies and trees ahead
-  spawnEnemiesAhead()
-  spawnTreesAhead()
+  // Spawn enemies and trees ahead (not during boss)
+  if (bossFightState === 'none') {
+    spawnEnemiesAhead()
+    spawnTreesAhead()
+  }
 
   // Tree collision (Level 3)
   if (currentLevel === 2 && player.visible) {
@@ -837,6 +997,114 @@ function update() {
         }
         break
       }
+    }
+  }
+
+  // Sushi-Boss collision
+  if (currentBoss && bossFightState === 'fighting' && !currentBoss.defeated) {
+    for (let si = sushis.length - 1; si >= 0; si--) {
+      const s = sushis[si]
+      if (!s) continue
+      // Crab king shield check
+      if (currentBoss.bossType === 'crab_king' && currentBoss.shieldTimer && currentBoss.shieldTimer > 0) {
+        if (Math.hypot(s.pos.x - currentBoss.pos.x, s.pos.y - currentBoss.pos.y) < currentBoss.radius + 6) {
+          sushis.splice(si, 1)
+          spawnParticles(s.pos.x, s.pos.y, 4, ['#8888ff', '#aaaaff'])
+          continue
+        }
+      }
+      if (Math.hypot(s.pos.x - currentBoss.pos.x, s.pos.y - currentBoss.pos.y) < currentBoss.radius + 6) {
+        sushis.splice(si, 1)
+        currentBoss.hp--
+        currentBoss.flashTimer = 6
+        spawnParticles(currentBoss.pos.x, currentBoss.pos.y, 6, ['#ffffff', '#ffff88'])
+        sfxHit()
+        if (currentBoss.hp <= 0 && !currentBoss.defeated) {
+          currentBoss.defeated = true
+          currentBoss.defeatTimer = 90
+          bossFightState = 'defeated'
+          sfxBossDefeat()
+          spawnParticles(currentBoss.pos.x, currentBoss.pos.y, 30, ['#ff4444', '#ffaa00', '#ffff44', '#ffffff'])
+        }
+        // Check phase transition
+        if (currentBoss.hp > 0 && currentBoss.hp <= currentBoss.maxHp * 0.5 && currentBoss.currentPhase === 0) {
+          currentBoss.currentPhase = 1
+          currentBoss.attackTimer = 30
+          spawnParticles(currentBoss.pos.x, currentBoss.pos.y, 15, ['#ff00ff', '#ff44ff', '#ffaaff'])
+        }
+        break
+      }
+    }
+  }
+
+  // Pole-Boss collision
+  if (poleSwing && player.visible && currentBoss && bossFightState === 'fighting' && !currentBoss.defeated) {
+    const px = player.pos.x + Math.cos(poleSwing.angle) * poleSwing.radius * 0.7
+    const py = player.pos.y + Math.sin(poleSwing.angle) * poleSwing.radius * 0.7
+    if (!(currentBoss.bossType === 'crab_king' && currentBoss.shieldTimer && currentBoss.shieldTimer > 0)) {
+      if (Math.hypot(px - currentBoss.pos.x, py - currentBoss.pos.y) < currentBoss.radius + 20) {
+        currentBoss.hp -= 2
+        currentBoss.flashTimer = 6
+        sfxHit()
+        spawnParticles(currentBoss.pos.x, currentBoss.pos.y, 8, ['#ffaa00', '#ff8800', '#ffcc44'])
+        if (currentBoss.hp <= 0 && !currentBoss.defeated) {
+          currentBoss.defeated = true
+          currentBoss.defeatTimer = 90
+          bossFightState = 'defeated'
+          sfxBossDefeat()
+          spawnParticles(currentBoss.pos.x, currentBoss.pos.y, 30, ['#ff4444', '#ffaa00', '#ffff44', '#ffffff'])
+        }
+        if (currentBoss.hp > 0 && currentBoss.hp <= currentBoss.maxHp * 0.5 && currentBoss.currentPhase === 0) {
+          currentBoss.currentPhase = 1
+          currentBoss.attackTimer = 30
+          spawnParticles(currentBoss.pos.x, currentBoss.pos.y, 15, ['#ff00ff', '#ff44ff', '#ffaaff'])
+        }
+      }
+    }
+  }
+
+  // Boss projectile - player collision
+  if (player.visible && player.invulnTimer <= 0) {
+    for (let i = bossProjectiles.length - 1; i >= 0; i--) {
+      const bp = bossProjectiles[i]
+      if (bp.type === 'net') {
+        // Net: damage if player stands in it for >0.5s (~30 frames)
+        const nr = bp.netRadius || 30
+        if (Math.hypot(player.pos.x - bp.pos.x, player.pos.y - bp.pos.y) < nr) {
+          bp.netTimer = (bp.netTimer || 0) + 1
+          if (bp.netTimer > 30) {
+            bossProjectiles.splice(i, 1)
+            playerDamage()
+            break
+          }
+        } else {
+          bp.netTimer = 0
+        }
+      } else {
+        if (Math.hypot(player.pos.x - bp.pos.x, player.pos.y - bp.pos.y) < player.radius + 5) {
+          bossProjectiles.splice(i, 1)
+          playerDamage()
+          break
+        }
+      }
+    }
+  }
+
+  // Tentacle sweep - player collision
+  if (player.visible && player.invulnTimer <= 0) {
+    for (const sweep of tentacleSweeps) {
+      if (player.pos.x > sweep.x - sweep.width / 2 && player.pos.x < sweep.x + sweep.width / 2 &&
+          player.pos.y > sweep.y - sweep.height / 2 && player.pos.y < sweep.y + sweep.height / 2) {
+        playerDamage()
+        break
+      }
+    }
+  }
+
+  // Boss contact damage
+  if (currentBoss && bossFightState === 'fighting' && !currentBoss.defeated && player.visible && player.invulnTimer <= 0) {
+    if (Math.hypot(player.pos.x - currentBoss.pos.x, player.pos.y - currentBoss.pos.y) < player.radius + currentBoss.radius - 4) {
+      playerDamage()
     }
   }
 
@@ -980,6 +1248,490 @@ function updateParticles() {
     p.pos.x += p.vel.x; p.pos.y += p.vel.y; p.life--
     if (p.life <= 0) particles.splice(i, 1)
   }
+}
+
+// ─── Boss Logic ───
+function createBoss(level: number): Boss {
+  const screenX = canvas.width / 2
+  const screenY = canvas.height * 0.22
+  const worldY = bossScrollYLock + (canvas.height - screenY)
+
+  if (level === 0) {
+    return {
+      name: 'Giant Octopus',
+      pos: { x: screenX, y: screenY },
+      worldY,
+      hp: 25, maxHp: 25,
+      radius: 40,
+      currentPhase: 0,
+      phases: [
+        { patterns: ['ink_spread'], attackInterval: 120 },
+        { patterns: ['ink_spread', 'tentacle_sweep'], attackInterval: 80 }
+      ],
+      phaseTimer: 0, attackTimer: 60, animFrame: 0,
+      defeated: false, defeatTimer: 0,
+      bossType: 'octopus', flashTimer: 0
+    }
+  } else if (level === 1) {
+    return {
+      name: 'Crab King',
+      pos: { x: screenX, y: screenY },
+      worldY,
+      hp: 35, maxHp: 35,
+      radius: 42,
+      currentPhase: 0,
+      phases: [
+        { patterns: ['charge'], attackInterval: 100 },
+        { patterns: ['charge', 'spawn_minions'], attackInterval: 70 }
+      ],
+      phaseTimer: 0, attackTimer: 60, animFrame: 0,
+      defeated: false, defeatTimer: 0,
+      bossType: 'crab_king', flashTimer: 0,
+      chargeVelX: 0, chargeDir: 1, shieldTimer: 0
+    }
+  } else {
+    return {
+      name: 'Master Fisherman',
+      pos: { x: screenX, y: screenY },
+      worldY,
+      hp: 40, maxHp: 40,
+      radius: 38,
+      currentPhase: 0,
+      phases: [
+        { patterns: ['cast_nets', 'throw_hooks'], attackInterval: 110 },
+        { patterns: ['throw_hooks', 'summon_seagulls', 'cast_nets'], attackInterval: 60 }
+      ],
+      phaseTimer: 0, attackTimer: 60, animFrame: 0,
+      defeated: false, defeatTimer: 0,
+      bossType: 'fisherman', flashTimer: 0
+    }
+  }
+}
+
+function updateBoss() {
+  if (!currentBoss || currentBoss.defeated) return
+  const boss = currentBoss
+  boss.animFrame++
+  boss.phaseTimer++
+  if (boss.flashTimer > 0) boss.flashTimer--
+
+  const phase = boss.phases[boss.currentPhase]
+  boss.attackTimer--
+
+  if (boss.attackTimer <= 0) {
+    boss.attackTimer = phase.attackInterval
+    // Pick a pattern
+    const pattern = phase.patterns[boss.phaseTimer % phase.patterns.length]
+    executeBossAttack(boss, pattern)
+  }
+
+  // Type-specific update
+  if (boss.bossType === 'octopus') {
+    // Gentle sway
+    boss.pos.x = canvas.width / 2 + Math.sin(boss.animFrame * 0.015) * 60
+  } else if (boss.bossType === 'crab_king') {
+    // Charge movement
+    if (boss.chargeVelX && boss.chargeVelX !== 0) {
+      boss.pos.x += boss.chargeVelX
+      if (boss.pos.x < boss.radius + 10 || boss.pos.x > canvas.width - boss.radius - 10) {
+        boss.chargeVelX = 0
+        boss.pos.x = Math.max(boss.radius + 10, Math.min(canvas.width - boss.radius - 10, boss.pos.x))
+      }
+    } else {
+      // Gentle bob
+      boss.pos.y = canvas.height * 0.22 + Math.sin(boss.animFrame * 0.02) * 10
+    }
+    if (boss.shieldTimer && boss.shieldTimer > 0) boss.shieldTimer--
+  } else if (boss.bossType === 'fisherman') {
+    // Subtle sway
+    boss.pos.x = canvas.width / 2 + Math.sin(boss.animFrame * 0.01) * 40
+  }
+
+  // Update boss projectiles
+  for (let i = bossProjectiles.length - 1; i >= 0; i--) {
+    const p = bossProjectiles[i]
+    if (p.type !== 'net') {
+      p.worldX += p.vel.x; p.worldY -= p.vel.y
+      p.pos.x = p.worldX
+      p.pos.y = canvas.height - (p.worldY - scrollY)
+    }
+    p.life--
+    if (p.life <= 0 || p.pos.x < -30 || p.pos.x > canvas.width + 30 || p.pos.y > canvas.height + 30 || p.pos.y < -30)
+      bossProjectiles.splice(i, 1)
+  }
+
+  // Update tentacle sweeps
+  for (let i = tentacleSweeps.length - 1; i >= 0; i--) {
+    const s = tentacleSweeps[i]
+    s.y += s.velY
+    s.life--
+    if (s.life <= 0 || s.y > canvas.height + 50) tentacleSweeps.splice(i, 1)
+  }
+}
+
+function executeBossAttack(boss: Boss, pattern: BossPhasePattern) {
+  if (pattern === 'ink_spread') {
+    // Fire ink projectiles in a fan
+    const count = boss.currentPhase === 0 ? 3 : 5
+    const spread = Math.PI * 0.6
+    const baseAngle = Math.PI / 2 // downward
+    const speed = boss.currentPhase === 0 ? 2.5 : 3.5
+    for (let i = 0; i < count; i++) {
+      const angle = baseAngle - spread / 2 + (spread / (count - 1)) * i
+      bossProjectiles.push({
+        pos: { x: boss.pos.x, y: boss.pos.y + boss.radius },
+        vel: { x: Math.cos(angle) * speed, y: -Math.sin(angle) * speed },
+        life: 120,
+        worldX: boss.pos.x,
+        worldY: scrollY + (canvas.height - boss.pos.y - boss.radius),
+        type: 'ink'
+      })
+    }
+  } else if (pattern === 'tentacle_sweep') {
+    tentacleSweeps.push({
+      x: canvas.width / 2,
+      y: boss.pos.y + boss.radius + 10,
+      width: canvas.width * 0.8,
+      height: 20,
+      life: 80,
+      velY: 2
+    })
+  } else if (pattern === 'charge') {
+    const speed = boss.currentPhase === 0 ? 5 : 8
+    boss.chargeDir = boss.pos.x > canvas.width / 2 ? -1 : 1
+    boss.chargeVelX = boss.chargeDir * speed
+  } else if (pattern === 'spawn_minions') {
+    // Spawn 2-3 mini crabs as regular enemies
+    const count = 2 + Math.floor(Math.random() * 2)
+    for (let i = 0; i < count; i++) {
+      const x = 40 + Math.random() * (canvas.width - 80)
+      const wy = scrollY + canvas.height * 0.4 + Math.random() * canvas.height * 0.3
+      enemies.push({
+        pos: { x, y: 0 },
+        vel: { x: 0, y: 0 },
+        type: 'crab',
+        hp: 1, radius: 10,
+        timer: Math.random() * 200,
+        shootTimer: 999,
+        animFrame: 0,
+        worldY: wy, baseX: x, moveFactor: 0.4
+      })
+    }
+    boss.shieldTimer = 60 // 1 second invulnerable
+  } else if (pattern === 'cast_nets') {
+    // Area denial circles
+    const count = boss.currentPhase === 0 ? 2 : 3
+    const nr = boss.currentPhase === 0 ? 30 : 45
+    for (let i = 0; i < count; i++) {
+      const tx = 40 + Math.random() * (canvas.width - 80)
+      const ty = canvas.height * 0.4 + Math.random() * (canvas.height * 0.4)
+      bossProjectiles.push({
+        pos: { x: tx, y: ty },
+        vel: { x: 0, y: 0 },
+        life: 180,
+        worldX: tx,
+        worldY: scrollY + (canvas.height - ty),
+        type: 'net',
+        netTimer: 0,
+        netRadius: nr
+      })
+    }
+  } else if (pattern === 'throw_hooks') {
+    // Aimed hook at player
+    const count = boss.currentPhase === 0 ? 1 : 3
+    for (let i = 0; i < count; i++) {
+      const dx = player.pos.x - boss.pos.x + (Math.random() - 0.5) * 40
+      const dy = player.pos.y - boss.pos.y
+      const d = Math.hypot(dx, dy)
+      const speed = boss.currentPhase === 0 ? 3 : 4.5
+      if (d > 0) {
+        bossProjectiles.push({
+          pos: { x: boss.pos.x, y: boss.pos.y + boss.radius },
+          vel: { x: (dx / d) * speed, y: -(dy / d) * speed },
+          life: 100,
+          worldX: boss.pos.x,
+          worldY: scrollY + (canvas.height - boss.pos.y - boss.radius),
+          type: 'hook'
+        })
+      }
+    }
+  } else if (pattern === 'summon_seagulls') {
+    for (let i = 0; i < 3; i++) {
+      const x = 30 + Math.random() * (canvas.width - 60)
+      const wy = scrollY + canvas.height + 50 + i * 80
+      enemies.push({
+        pos: { x, y: 0 },
+        vel: { x: 0, y: 0 },
+        type: 'seagull',
+        hp: 1, radius: 12,
+        timer: Math.random() * 200,
+        shootTimer: 999,
+        animFrame: 0,
+        worldY: wy, baseX: x, moveFactor: 0.5
+      })
+    }
+  }
+}
+
+function drawBoss() {
+  if (!currentBoss) return
+  const boss = currentBoss
+  if (boss.defeated && boss.defeatTimer % 4 < 2) return // Flash when defeated
+
+  ctx.save()
+  ctx.translate(boss.pos.x, boss.pos.y)
+
+  // Flash white on hit
+  const isFlash = boss.flashTimer > 0
+
+  if (boss.bossType === 'octopus') {
+    // Body
+    ctx.fillStyle = isFlash ? '#ffffff' : '#663388'
+    ctx.beginPath()
+    ctx.arc(0, 0, boss.radius, 0, Math.PI * 2)
+    ctx.fill()
+    // Spots
+    if (!isFlash) {
+      ctx.fillStyle = '#884499'
+      for (let i = 0; i < 5; i++) {
+        const a = (i / 5) * Math.PI * 2 + boss.animFrame * 0.01
+        ctx.beginPath()
+        ctx.arc(Math.cos(a) * 20, Math.sin(a) * 15, 5, 0, Math.PI * 2)
+        ctx.fill()
+      }
+    }
+    // Eyes
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath(); ctx.arc(-12, -10, 8, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(12, -10, 8, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#000000'
+    ctx.beginPath(); ctx.arc(-10, -10, 4, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(14, -10, 4, 0, Math.PI * 2); ctx.fill()
+    // 8 tentacles
+    if (!isFlash) {
+      ctx.strokeStyle = '#553377'; ctx.lineWidth = 4
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI + Math.PI * 0.1
+        const baseX = Math.cos(a) * boss.radius * 0.8
+        const baseY = boss.radius * 0.6
+        const wave = Math.sin(boss.animFrame * 0.05 + i) * 15
+        ctx.beginPath()
+        ctx.moveTo(baseX, baseY)
+        ctx.quadraticCurveTo(baseX + wave, baseY + 25, baseX + wave * 0.5, baseY + 50)
+        ctx.stroke()
+      }
+    }
+  } else if (boss.bossType === 'crab_king') {
+    // Shield visual
+    if (boss.shieldTimer && boss.shieldTimer > 0) {
+      ctx.strokeStyle = `rgba(100,100,255,${0.3 + Math.sin(boss.animFrame * 0.3) * 0.2})`
+      ctx.lineWidth = 3
+      ctx.beginPath(); ctx.arc(0, 0, boss.radius + 10, 0, Math.PI * 2); ctx.stroke()
+    }
+    // Body
+    ctx.fillStyle = isFlash ? '#ffffff' : '#cc2222'
+    ctx.beginPath()
+    ctx.ellipse(0, 0, boss.radius + 5, boss.radius - 5, 0, 0, Math.PI * 2)
+    ctx.fill()
+    // Crown
+    ctx.fillStyle = '#ffdd00'
+    ctx.beginPath()
+    ctx.moveTo(-15, -boss.radius + 5)
+    ctx.lineTo(-12, -boss.radius - 12)
+    ctx.lineTo(-5, -boss.radius + 2)
+    ctx.lineTo(0, -boss.radius - 15)
+    ctx.lineTo(5, -boss.radius + 2)
+    ctx.lineTo(12, -boss.radius - 12)
+    ctx.lineTo(15, -boss.radius + 5)
+    ctx.closePath(); ctx.fill()
+    // Crown gems
+    ctx.fillStyle = '#ff0000'
+    ctx.beginPath(); ctx.arc(0, -boss.radius - 8, 3, 0, Math.PI * 2); ctx.fill()
+    // Giant claws
+    if (!isFlash) {
+      const clawAnim = Math.sin(boss.animFrame * 0.08) * 0.3
+      for (const side of [-1, 1]) {
+        ctx.save()
+        ctx.translate(side * (boss.radius + 15), -5)
+        ctx.rotate(side * clawAnim)
+        ctx.fillStyle = '#ee3333'
+        ctx.beginPath()
+        ctx.arc(0, 0, 18, 0, Math.PI * 2); ctx.fill()
+        // Claw pinch
+        ctx.fillStyle = '#dd2222'
+        ctx.beginPath()
+        ctx.moveTo(side * 8, -10); ctx.lineTo(side * 20, -15); ctx.lineTo(side * 12, -5)
+        ctx.closePath(); ctx.fill()
+        ctx.beginPath()
+        ctx.moveTo(side * 8, 5); ctx.lineTo(side * 20, 10); ctx.lineTo(side * 12, 0)
+        ctx.closePath(); ctx.fill()
+        ctx.restore()
+      }
+    }
+    // Eyes
+    ctx.fillStyle = '#ffffff'
+    ctx.beginPath(); ctx.arc(-10, -8, 6, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(10, -8, 6, 0, Math.PI * 2); ctx.fill()
+    ctx.fillStyle = '#000000'
+    ctx.beginPath(); ctx.arc(-9, -8, 3, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.arc(11, -8, 3, 0, Math.PI * 2); ctx.fill()
+    // Legs
+    ctx.strokeStyle = '#cc2222'; ctx.lineWidth = 3
+    for (const side of [-1, 1]) {
+      for (let j = 0; j < 3; j++) {
+        const lx = side * (15 + j * 10)
+        ctx.beginPath()
+        ctx.moveTo(lx, boss.radius - 10)
+        ctx.lineTo(lx + side * 8, boss.radius + 8 + Math.sin(boss.animFrame * 0.1 + j) * 3)
+        ctx.stroke()
+      }
+    }
+  } else if (boss.bossType === 'fisherman') {
+    // Body (large)
+    ctx.fillStyle = isFlash ? '#ffffff' : '#3355aa'
+    ctx.beginPath()
+    ctx.arc(0, 5, boss.radius - 5, 0, Math.PI * 2)
+    ctx.fill()
+    // Head
+    ctx.fillStyle = isFlash ? '#ffffff' : '#dda877'
+    ctx.beginPath()
+    ctx.arc(0, -boss.radius + 8, 16, 0, Math.PI * 2)
+    ctx.fill()
+    // Big hat
+    ctx.fillStyle = '#556633'
+    ctx.fillRect(-18, -boss.radius - 8, 36, 10)
+    ctx.fillRect(-14, -boss.radius - 18, 28, 12)
+    // Angry eyes
+    ctx.fillStyle = '#000000'
+    ctx.fillRect(-8, -boss.radius + 5, 5, 3)
+    ctx.fillRect(3, -boss.radius + 5, 5, 3)
+    // Eyebrows (angry)
+    ctx.strokeStyle = '#000000'; ctx.lineWidth = 2
+    ctx.beginPath(); ctx.moveTo(-10, -boss.radius + 2); ctx.lineTo(-3, -boss.radius + 4); ctx.stroke()
+    ctx.beginPath(); ctx.moveTo(10, -boss.radius + 2); ctx.lineTo(3, -boss.radius + 4); ctx.stroke()
+    // Giant fishing rod
+    if (!isFlash) {
+      ctx.strokeStyle = '#8B6914'; ctx.lineWidth = 4
+      ctx.beginPath()
+      ctx.moveTo(20, 0); ctx.lineTo(40, -40); ctx.lineTo(50, -50)
+      ctx.stroke()
+      ctx.strokeStyle = '#aaaaaa'; ctx.lineWidth = 1
+      ctx.beginPath()
+      ctx.moveTo(50, -50)
+      ctx.lineTo(50 + Math.sin(boss.animFrame * 0.05) * 10, -30)
+      ctx.stroke()
+    }
+  }
+
+  ctx.restore()
+}
+
+function drawBossProjectiles() {
+  for (const p of bossProjectiles) {
+    if (p.type === 'ink') {
+      ctx.fillStyle = '#2a0a3a'
+      ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y, 5, 0, Math.PI * 2); ctx.fill()
+      ctx.fillStyle = 'rgba(60,20,80,0.4)'
+      ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y, 9, 0, Math.PI * 2); ctx.fill()
+    } else if (p.type === 'hook') {
+      ctx.strokeStyle = '#cccccc'; ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(p.pos.x, p.pos.y, 6, 0, Math.PI)
+      ctx.stroke()
+      ctx.fillStyle = '#888888'
+      ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y, 3, 0, Math.PI * 2); ctx.fill()
+    } else if (p.type === 'net') {
+      const nr = p.netRadius || 30
+      const alpha = Math.min(p.life / 30, 1) * 0.35
+      ctx.fillStyle = `rgba(139,69,19,${alpha})`
+      ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y, nr, 0, Math.PI * 2); ctx.fill()
+      // Net pattern
+      ctx.strokeStyle = `rgba(160,120,60,${alpha + 0.1})`; ctx.lineWidth = 1
+      for (let a = 0; a < Math.PI * 2; a += Math.PI / 4) {
+        ctx.beginPath()
+        ctx.moveTo(p.pos.x, p.pos.y)
+        ctx.lineTo(p.pos.x + Math.cos(a) * nr, p.pos.y + Math.sin(a) * nr)
+        ctx.stroke()
+      }
+      ctx.beginPath(); ctx.arc(p.pos.x, p.pos.y, nr * 0.5, 0, Math.PI * 2); ctx.stroke()
+    }
+  }
+
+  // Tentacle sweeps
+  for (const s of tentacleSweeps) {
+    const alpha = Math.min(s.life / 20, 1) * 0.6
+    ctx.fillStyle = `rgba(100,50,150,${alpha})`
+    ctx.fillRect(s.x - s.width / 2, s.y - s.height / 2, s.width, s.height)
+    ctx.strokeStyle = `rgba(150,80,200,${alpha})`; ctx.lineWidth = 2
+    ctx.strokeRect(s.x - s.width / 2, s.y - s.height / 2, s.width, s.height)
+  }
+}
+
+function drawBossHealthBar() {
+  if (!currentBoss || bossFightState !== 'fighting' && bossFightState !== 'defeated') return
+  const boss = currentBoss
+  const barW = canvas.width * 0.7
+  const barH = 16
+  const barX = (canvas.width - barW) / 2
+  const barY = 10
+
+  // Background
+  ctx.fillStyle = 'rgba(0,0,0,0.6)'
+  ctx.fillRect(barX - 2, barY - 2, barW + 4, barH + 4)
+
+  // Health gradient
+  const hpRatio = Math.max(0, boss.hp / boss.maxHp)
+  const grad = ctx.createLinearGradient(barX, 0, barX + barW * hpRatio, 0)
+  if (hpRatio > 0.5) {
+    grad.addColorStop(0, '#44ff44')
+    grad.addColorStop(1, '#88ff44')
+  } else if (hpRatio > 0.25) {
+    grad.addColorStop(0, '#ffcc00')
+    grad.addColorStop(1, '#ff8800')
+  } else {
+    grad.addColorStop(0, '#ff4444')
+    grad.addColorStop(1, '#ff0000')
+  }
+  ctx.fillStyle = grad
+  ctx.fillRect(barX, barY, barW * hpRatio, barH)
+
+  // Segments
+  ctx.strokeStyle = 'rgba(0,0,0,0.3)'; ctx.lineWidth = 1
+  const segments = 20
+  for (let i = 1; i < segments; i++) {
+    const sx = barX + (barW / segments) * i
+    ctx.beginPath(); ctx.moveTo(sx, barY); ctx.lineTo(sx, barY + barH); ctx.stroke()
+  }
+
+  // Border
+  ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 1.5
+  ctx.strokeRect(barX, barY, barW, barH)
+
+  // Boss name
+  ctx.fillStyle = '#ffffff'; ctx.font = `bold ${isPortrait ? 11 : 13}px monospace`
+  ctx.textAlign = 'center'
+  ctx.fillText(boss.name, canvas.width / 2, barY + barH + 14)
+}
+
+function drawBossWarning() {
+  if (bossFightState !== 'warning') return
+  const flash = Math.sin(bossWarningTimer * 0.3) > 0
+  if (flash) {
+    ctx.fillStyle = 'rgba(255,0,0,0.15)'
+    ctx.fillRect(0, 0, canvas.width, canvas.height)
+  }
+  ctx.save()
+  ctx.textAlign = 'center'
+  const scale = 1 + Math.sin(bossWarningTimer * 0.2) * 0.1
+  ctx.translate(canvas.width / 2, canvas.height * 0.4)
+  ctx.scale(scale, scale)
+  ctx.fillStyle = '#ff0000'
+  ctx.font = `bold ${isPortrait ? 40 : 56}px monospace`
+  ctx.fillText('⚠ WARNING! ⚠', 0, 0)
+  ctx.fillStyle = 'rgba(255,255,255,0.7)'
+  ctx.font = `bold ${isPortrait ? 18 : 24}px monospace`
+  ctx.fillText('BOSS APPROACHING', 0, 40)
+  ctx.restore()
 }
 
 // ─── Draw ───
@@ -1968,11 +2720,15 @@ function draw() {
   } else if (state === 'playing') {
     drawScrollingBackground()
     for (const en of enemies) drawEnemy(en)
+    if (currentBoss && (bossFightState === 'fighting' || bossFightState === 'defeated')) drawBoss()
+    drawBossProjectiles()
     drawPlayer()
     drawSushis()
     drawEnemyProjectiles()
     drawParticles()
     drawHUD()
+    if (bossFightState === 'fighting' || bossFightState === 'defeated') drawBossHealthBar()
+    drawBossWarning()
     drawTouchControls()
     if (paused) {
       ctx.fillStyle = 'rgba(0,0,0,0.5)'
