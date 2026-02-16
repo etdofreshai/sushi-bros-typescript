@@ -491,16 +491,6 @@ function update() {
   if (state === 'gameover') return
   if (paused) return
 
-  // Camera: dead zone scrolling. Bottom 67% = free movement, no scroll.
-  // When player enters top 33%, camera scrolls up instantly to pin player at threshold.
-  const scrollThreshold = canvas.height * 0.33
-  if (player.pos.y < scrollThreshold) {
-    const diff = scrollThreshold - player.pos.y
-    scrollY += diff
-    player.pos.y = scrollThreshold
-  }
-  distance = Math.floor(scrollY)
-
   // Respawn logic
   if (player.respawnTimer > 0) {
     player.respawnTimer--
@@ -553,9 +543,19 @@ function update() {
   player.pos.x += moveX * playerSpeed
   player.pos.y += moveY * playerSpeed
 
-  // Keep player on screen (allow moving to top to scroll forward)
+  // Keep player on screen
   player.pos.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.pos.x))
   player.pos.y = Math.max(player.radius + 20, Math.min(canvas.height - player.radius - 20, player.pos.y))
+
+  // Camera: when player tries to go above the top 33%, scroll the world instead.
+  // Player never visually passes this threshold — the screen moves, not the player.
+  const scrollThreshold = canvas.height * 0.33
+  if (player.pos.y < scrollThreshold) {
+    const diff = scrollThreshold - player.pos.y
+    scrollY += diff
+    player.pos.y = scrollThreshold
+  }
+  distance = Math.floor(scrollY)
 
   // Keyboard actions
   if (keys['Space']) { keys['Space'] = false; throwSushi() }
