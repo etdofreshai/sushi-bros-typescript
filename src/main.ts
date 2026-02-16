@@ -449,10 +449,11 @@ function update() {
   // Player's world Y = scrollY + (canvas.height - player.pos.y)
   // When player moves up (screen Y decreases), world Y increases
   const playerWorldY = scrollY + (canvas.height - player.pos.y)
-  // Only scroll forward (never backward) — once you pass a point, it stays
-  const targetScrollY = playerWorldY - canvas.height * 0.7 // keep player at ~70% from top
+  // Only scroll forward (never backward) — smooth scroll with lerp
+  const targetScrollY = playerWorldY - canvas.height * 0.7
   if (targetScrollY > scrollY) {
-    scrollY = targetScrollY
+    // Slow, smooth scroll — lerp toward target
+    scrollY += (targetScrollY - scrollY) * 0.03
   }
   distance = Math.floor(scrollY)
 
@@ -467,6 +468,11 @@ function update() {
     updateParticles()
     return
   }
+
+  // Determine terrain under player
+  const playerWorldYForTerrain = scrollY + (canvas.height - player.pos.y)
+  const playerTerrain = getTerrainAt(playerWorldYForTerrain)
+  const onWater = playerTerrain === 'water'
 
   // Player movement
   let moveX = 0, moveY = 0
@@ -483,13 +489,23 @@ function update() {
     moveY = Math.sin(dpadAngle)
   }
 
+  // On water (boat): only forward/backward (up/down), no left/right
+  if (onWater) {
+    moveX = 0
+  }
+
   const moveLen = Math.hypot(moveX, moveY)
   if (moveLen > 0) {
     moveX /= moveLen; moveY /= moveLen
-    player.facing = Math.atan2(moveY, moveX)
+    if (onWater) {
+      // On boat, always face up
+      player.facing = -Math.PI / 2
+    } else {
+      player.facing = Math.atan2(moveY, moveX)
+    }
   }
 
-  const playerSpeed = 3.5
+  const playerSpeed = onWater ? 2.5 : 3.5
   player.pos.x += moveX * playerSpeed
   player.pos.y += moveY * playerSpeed
 
@@ -803,8 +819,42 @@ function drawPlayer() {
   if (player.invulnTimer > 0 && Math.floor(frameCount / 4) % 2 === 0) return
 
   const px = player.pos.x, py = player.pos.y
+  
+  // Check if player is on water
+  const pwY = scrollY + (canvas.height - py)
+  const isOnWater = getTerrainAt(pwY) === 'water'
+
+  // Draw boat under player when on water
+  if (isOnWater) {
+    ctx.save()
+    ctx.translate(px, py)
+    // Boat hull
+    ctx.fillStyle = '#8B4513'
+    ctx.beginPath()
+    ctx.moveTo(-22, 8); ctx.lineTo(-16, 18); ctx.lineTo(16, 18); ctx.lineTo(22, 8)
+    ctx.closePath(); ctx.fill()
+    // Boat deck
+    ctx.fillStyle = '#A0522D'
+    ctx.fillRect(-14, 6, 28, 4)
+    // Gentle bob
+    const bob = Math.sin(frameCount * 0.04) * 1.5
+    ctx.translate(0, bob)
+    // Wake lines behind boat
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)'
+    ctx.lineWidth = 1
+    ctx.beginPath()
+    ctx.moveTo(-10, 20); ctx.lineTo(-18, 32)
+    ctx.moveTo(10, 20); ctx.lineTo(18, 32)
+    ctx.stroke()
+    ctx.restore()
+  }
+
   ctx.save()
   ctx.translate(px, py)
+  // Bob on water
+  if (isOnWater) {
+    ctx.translate(0, Math.sin(frameCount * 0.04) * 1.5 - 4)
+  }
 
   // Body (white chef outfit)
   ctx.fillStyle = '#ffffff'
