@@ -18,105 +18,146 @@ addEventListener('resize', resize)
 // ─── Audio ───
 const audioCtx = new AudioContext()
 
-function sfxSushiThrow() {
-  const o = audioCtx.createOscillator(), g = audioCtx.createGain()
-  o.connect(g); g.connect(audioCtx.destination)
-  o.type = 'sine'
-  o.frequency.setValueAtTime(600, audioCtx.currentTime)
-  o.frequency.exponentialRampToValueAtTime(300, audioCtx.currentTime + 0.12)
-  g.gain.setValueAtTime(0.1, audioCtx.currentTime)
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12)
-  o.start(); o.stop(audioCtx.currentTime + 0.12)
-}
-
-function sfxPoleSwing() {
-  const o = audioCtx.createOscillator(), g = audioCtx.createGain()
-  o.connect(g); g.connect(audioCtx.destination)
-  o.type = 'sawtooth'
-  o.frequency.setValueAtTime(150, audioCtx.currentTime)
-  o.frequency.exponentialRampToValueAtTime(80, audioCtx.currentTime + 0.25)
-  g.gain.setValueAtTime(0.08, audioCtx.currentTime)
-  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.25)
-  o.start(); o.stop(audioCtx.currentTime + 0.25)
-}
-
-function sfxHit() {
-  const t = audioCtx.currentTime
-  const noiseLen = audioCtx.sampleRate * 0.3
-  const noiseBuf = audioCtx.createBuffer(1, noiseLen, audioCtx.sampleRate)
-  const nd = noiseBuf.getChannelData(0)
-  for (let i = 0; i < noiseLen; i++) nd[i] = (Math.random() * 2 - 1)
-  const src = audioCtx.createBufferSource(); src.buffer = noiseBuf
-  const lp = audioCtx.createBiquadFilter(); lp.type = 'lowpass'
-  lp.frequency.setValueAtTime(400, t); lp.frequency.exponentialRampToValueAtTime(50, t + 0.3)
-  const g = audioCtx.createGain()
-  g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.3)
-  src.connect(lp); lp.connect(g); g.connect(audioCtx.destination)
-  src.start(t); src.stop(t + 0.3)
-}
-
-function sfxPlayerHit() {
-  const t = audioCtx.currentTime
+function sfxLaser() {
   const o = audioCtx.createOscillator(), g = audioCtx.createGain()
   o.connect(g); g.connect(audioCtx.destination)
   o.type = 'square'
-  o.frequency.setValueAtTime(200, t)
-  o.frequency.exponentialRampToValueAtTime(50, t + 0.5)
-  g.gain.setValueAtTime(0.12, t)
-  g.gain.exponentialRampToValueAtTime(0.001, t + 0.5)
-  o.start(t); o.stop(t + 0.5)
+  o.frequency.setValueAtTime(880, audioCtx.currentTime)
+  o.frequency.exponentialRampToValueAtTime(220, audioCtx.currentTime + 0.15)
+  g.gain.setValueAtTime(0.12, audioCtx.currentTime)
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15)
+  o.start(); o.stop(audioCtx.currentTime + 0.15)
 }
 
-function sfxSplash() {
+function sfxExplosion(big = false) {
   const t = audioCtx.currentTime
-  const len = audioCtx.sampleRate * 0.4
+  const duration = big ? 1.2 : 0.6
+
+  // Layer 1: Deep sub-bass rumble (shaped noise through biquad)
+  const noiseLen = audioCtx.sampleRate * duration
+  const noiseBuf = audioCtx.createBuffer(1, noiseLen, audioCtx.sampleRate)
+  const nd = noiseBuf.getChannelData(0)
+  for (let i = 0; i < noiseLen; i++) {
+    nd[i] = Math.random() * 2 - 1
+  }
+  const noiseSrc = audioCtx.createBufferSource()
+  noiseSrc.buffer = noiseBuf
+  const lp = audioCtx.createBiquadFilter()
+  lp.type = 'lowpass'
+  lp.frequency.setValueAtTime(big ? 120 : 200, t)
+  lp.frequency.exponentialRampToValueAtTime(30, t + duration)
+  lp.Q.value = 1.5
+  const noiseGain = audioCtx.createGain()
+  noiseGain.gain.setValueAtTime(big ? 0.5 : 0.3, t)
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, t + duration)
+  noiseSrc.connect(lp)
+  lp.connect(noiseGain)
+  noiseGain.connect(audioCtx.destination)
+  noiseSrc.start(t)
+  noiseSrc.stop(t + duration)
+
+  // Layer 2: Mid-freq crunch (bandpass noise for body)
+  const crunchSrc = audioCtx.createBufferSource()
+  crunchSrc.buffer = noiseBuf
+  const bp = audioCtx.createBiquadFilter()
+  bp.type = 'bandpass'
+  bp.frequency.setValueAtTime(big ? 300 : 400, t)
+  bp.frequency.exponentialRampToValueAtTime(80, t + duration * 0.6)
+  bp.Q.value = 0.8
+  const crunchGain = audioCtx.createGain()
+  crunchGain.gain.setValueAtTime(big ? 0.3 : 0.2, t)
+  crunchGain.gain.exponentialRampToValueAtTime(0.001, t + duration * 0.5)
+  crunchSrc.connect(bp)
+  bp.connect(crunchGain)
+  crunchGain.connect(audioCtx.destination)
+  crunchSrc.start(t)
+  crunchSrc.stop(t + duration)
+
+  // Layer 3: Initial transient click/punch
+  const clickOsc = audioCtx.createOscillator()
+  const clickGain = audioCtx.createGain()
+  clickOsc.type = 'sine'
+  clickOsc.frequency.setValueAtTime(big ? 80 : 100, t)
+  clickOsc.frequency.exponentialRampToValueAtTime(20, t + 0.15)
+  clickGain.gain.setValueAtTime(big ? 0.4 : 0.25, t)
+  clickGain.gain.exponentialRampToValueAtTime(0.001, t + 0.15)
+  clickOsc.connect(clickGain)
+  clickGain.connect(audioCtx.destination)
+  clickOsc.start(t)
+  clickOsc.stop(t + 0.15)
+
+  // Layer 4: Distortion-like overtones via waveshaper on noise
+  const distSrc = audioCtx.createBufferSource()
+  distSrc.buffer = noiseBuf
+  const distLP = audioCtx.createBiquadFilter()
+  distLP.type = 'lowpass'
+  distLP.frequency.setValueAtTime(big ? 500 : 600, t)
+  distLP.frequency.exponentialRampToValueAtTime(40, t + duration * 0.8)
+  const waveshaper = audioCtx.createWaveShaper()
+  const curve = new Float32Array(256)
+  for (let i = 0; i < 256; i++) {
+    const x = (i / 128) - 1
+    curve[i] = Math.tanh(x * 3)
+  }
+  waveshaper.curve = curve
+  const distGain = audioCtx.createGain()
+  distGain.gain.setValueAtTime(big ? 0.15 : 0.08, t)
+  distGain.gain.exponentialRampToValueAtTime(0.001, t + duration * 0.7)
+  distSrc.connect(distLP)
+  distLP.connect(waveshaper)
+  waveshaper.connect(distGain)
+  distGain.connect(audioCtx.destination)
+  distSrc.start(t)
+  distSrc.stop(t + duration)
+}
+
+function sfxHyperspace() {
+  const o = audioCtx.createOscillator(), g = audioCtx.createGain()
+  o.connect(g); g.connect(audioCtx.destination)
+  o.type = 'sine'
+  o.frequency.setValueAtTime(200, audioCtx.currentTime)
+  o.frequency.exponentialRampToValueAtTime(1200, audioCtx.currentTime + 0.2)
+  o.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.4)
+  g.gain.setValueAtTime(0.15, audioCtx.currentTime)
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.4)
+  o.start(); o.stop(audioCtx.currentTime + 0.4)
+}
+
+function sfxThrust() {
+  const len = audioCtx.sampleRate * 0.05
   const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate)
   const d = buf.getChannelData(0)
-  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len)
-  const src = audioCtx.createBufferSource(); src.buffer = buf
-  const bp = audioCtx.createBiquadFilter(); bp.type = 'bandpass'
-  bp.frequency.setValueAtTime(800, t); bp.frequency.exponentialRampToValueAtTime(200, t + 0.4)
-  const g = audioCtx.createGain()
-  g.gain.setValueAtTime(0.06, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.4)
-  src.connect(bp); bp.connect(g); g.connect(audioCtx.destination)
-  src.start(t); src.stop(t + 0.4)
+  for (let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / len) * 0.3
+  const s = audioCtx.createBufferSource(); s.buffer = buf
+  const g = audioCtx.createGain(); s.connect(g); g.connect(audioCtx.destination)
+  g.gain.setValueAtTime(0.04, audioCtx.currentTime)
+  g.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.05)
+  s.start()
 }
 
 // ─── Types ───
 interface Vec2 { x: number; y: number }
-
-type EnemyType = 'crab' | 'seagull' | 'fisherman'
-interface Enemy {
-  pos: Vec2; vel: Vec2; type: EnemyType; hp: number; radius: number
-  timer: number; shootTimer: number; animFrame: number
-  worldY: number; baseX: number; moveFactor: number
+type AsteroidSize = 'large' | 'medium' | 'small'
+interface Ship { pos: Vec2; vel: Vec2; angle: number; thrust: boolean; radius: number }
+interface Bullet { pos: Vec2; vel: Vec2; life: number }
+interface Asteroid {
+  pos: Vec2; vel: Vec2; radius: number; size: AsteroidSize
+  rot: number; rotSpeed: number
+  shape: number[] // vertex radii offsets for irregular shape
 }
-
-interface Sushi { pos: Vec2; vel: Vec2; life: number }
-interface EnemyProjectile { pos: Vec2; vel: Vec2; life: number }
-
-interface PoleSwing {
-  angle: number; timer: number; maxTimer: number; radius: number
-}
-
 interface Particle { pos: Vec2; vel: Vec2; life: number; maxLife: number; color: string }
 
-interface Player {
-  pos: Vec2; vel: Vec2; radius: number; facing: number
-  invulnTimer: number; visible: boolean; respawnTimer: number
-}
+const SIZE_RADIUS: Record<AsteroidSize, number> = { large: 40, medium: 20, small: 10 }
+const SIZE_SCORE: Record<AsteroidSize, number> = { large: 20, medium: 50, small: 100 }
 
-// ─── Terrain ───
-type TerrainType = 'water' | 'sand' | 'grass'
-const TERRAIN_COLORS: Record<TerrainType, string> = {
-  water: '#1a3a5c',
-  sand: '#c2a65a',
-  grass: '#2d7a2d'
-}
+// ─── Stars ───
+const stars = Array.from({ length: 200 }, () => ({
+  x: Math.random(), y: Math.random(), brightness: 0.3 + Math.random() * 0.7, size: 0.5 + Math.random() * 1.5
+}))
 
 // ─── Control Mode ───
 type ControlMode = 'direction' | 'spin'
-let controlMode: ControlMode = (localStorage.getItem('sushi-bros-ctrl') as ControlMode) || 'direction'
+let controlMode: ControlMode = (localStorage.getItem('sushi-bros-ctrl') as ControlMode) || 'spin'
 
 // ─── State ───
 type GameState = 'menu' | 'playing' | 'gameover'
@@ -124,58 +165,18 @@ let state: GameState = 'menu'
 let score = 0
 let highScore = parseInt(localStorage.getItem('sushi-bros-hi') || '0')
 let lives = 3
-let scrollY = 0 // total scroll distance (increases)
-let scrollSpeed = 1.2
-let player: Player
-let sushis: Sushi[] = []
-let enemies: Enemy[] = []
-let enemyProjectiles: EnemyProjectile[] = []
+let level = 1
+let ship: Ship
+let bullets: Bullet[] = []
+let asteroids: Asteroid[] = []
 let particles: Particle[] = []
-let poleSwing: PoleSwing | null = null
+let respawnTimer = 0
+let shipVisible = true
+let invulnerableTimer = 0
+const INVULNERABLE_DURATION = 180 // 3 seconds at 60fps
+let thrustTick = 0
 let frameCount = 0
 let paused = false
-let lastEnemySpawn = 0
-let distance = 0
-let boatY = 0 // intro boat position
-
-// Terrain segments - each covers SEGMENT_H pixels of world height
-const SEGMENT_H = 200
-// We generate terrain as rows; terrainMap[worldRow] = terrain type
-// worldRow = Math.floor(worldY / SEGMENT_H)
-// The world scrolls: worldY increases as player progresses
-// Screen shows worldY = scrollY at bottom, scrollY + canvas.height at top
-
-// Simple deterministic hash for stable terrain transitions
-function hashY(y: number): number {
-  let h = (y * 2654435761) | 0
-  h = ((h >>> 16) ^ h) * 0x45d9f3b | 0
-  h = ((h >>> 16) ^ h) | 0
-  return (h & 0x7fffffff) / 0x7fffffff // 0..1
-}
-
-function getTerrainAt(worldY: number): TerrainType {
-  // worldY increases upward (forward progress)
-  // Start on water, transition to sand then grass
-  const d = worldY
-  // Quantize to avoid per-pixel noise in transitions
-  const qd = Math.floor(d / 8) * 8
-  if (d < 800) return 'water'
-  if (d < 1200) return hashY(qd) > (d - 800) / 400 ? 'water' : 'sand'
-  if (d < 1600) return 'sand'
-  if (d < 2000) return hashY(qd) > (d - 1600) / 400 ? 'sand' : 'grass'
-  // After 2000: mostly grass with occasional sand/water patches
-  const cycle = (d % 3000)
-  if (cycle < 2000) return 'grass'
-  if (cycle < 2400) return 'sand'
-  if (cycle < 2600) return 'water'
-  if (cycle < 3000) return 'sand'
-  return 'grass'
-}
-
-function getTerrainColor(worldY: number): string {
-  const t = getTerrainAt(worldY)
-  return TERRAIN_COLORS[t]
-}
 
 // ─── Input ───
 const keys: Record<string, boolean> = {}
@@ -183,7 +184,7 @@ addEventListener('keydown', e => {
   keys[e.code] = true
   if (state === 'menu' && e.code === 'Tab') { e.preventDefault(); toggleControlMode() }
   if (state === 'menu' && (e.code === 'Enter' || e.code === 'Space')) startGame()
-  if (state === 'gameover' && e.code === 'Enter') startGame()
+  if (state === 'gameover' && e.code === 'Enter') { startGame() }
   if (state === 'gameover' && e.code === 'Escape') { state = 'menu' }
   if (state === 'playing' && (e.code === 'Escape' || e.code === 'KeyP')) { paused = !paused }
 })
@@ -193,32 +194,40 @@ addEventListener('keyup', e => { keys[e.code] = false })
 const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0
 
 const dpad = { left: false, right: false, up: false, down: false }
-let dpadAngle: number | null = null
+let dpadAngle: number | null = null  // exact angle for direction mode
 let dpadTouchId: number | null = null
 let fireActive = false
 let fireTouchId: number | null = null
 let fireAutoTimer: ReturnType<typeof setInterval> | null = null
-let firePos_: Vec2 | null = null
-let fireOpacity = 0.35
-let dpadOpacity = 0.35
-let poleActive = false
-let poleTouchId: number | null = null
+let firePos_: Vec2 | null = null  // where the fire button currently is (follows thumb)
+let fireOpacity = 0.35  // 0.35 = idle, 1 = active; fades to 35% after release
+let fireCenter: Vec2 | null = null  // center of right stick when touching
+let fireThumb: Vec2 = { x: 0, y: 0 }
+let shootAngle: number = -Math.PI / 2  // last shoot direction (defaults to up)
+let fireStickActive = false  // true when right stick is beyond dead zone
+let dpadOpacity = 0.35  // 0.35 = idle, 1 = active; fades to 35%
+let hyperspaceActive = false
+let hyperspaceTouchId: number | null = null
 
 const DPAD_R = 55
 const DPAD_DEAD = 14
 const BTN_R = 38
-const POLE_R = Math.round(BTN_R * 0.7)
+const HYPER_R = Math.round(BTN_R * 0.6)
 
-let joystickCenter: Vec2 | null = null
+// Floating joystick state
+let joystickCenter: Vec2 | null = null  // null when not touching
 let joystickThumb: Vec2 = { x: 0, y: 0 }
-const JOYSTICK_ZONE_X = 0.5
+const JOYSTICK_ZONE_X = 0.5  // left half of screen is joystick zone
 
 function dpadPos() { return joystickCenter || { x: 90, y: canvas.height - 280 } }
 function firePos() { return firePos_ || { x: canvas.width - 85, y: canvas.height - 280 } }
-function polePos() {
+function hyperspacePos() {
   const fp = firePos()
-  const gap = BTN_R + POLE_R + 20
-  if (fp.y - gap - POLE_R < 60) return { x: fp.x, y: fp.y + gap }
+  const gap = DPAD_R + HYPER_R + 20  // directly above fire with generous spacing
+  // If fire is too close to the top, place hyperspace below instead
+  if (fp.y - gap - HYPER_R < 60) {
+    return { x: fp.x, y: fp.y + gap }
+  }
   return { x: fp.x, y: fp.y - gap }
 }
 
@@ -230,12 +239,19 @@ function updateDpad(tx: number, ty: number) {
   if (!joystickCenter) return
   const dx = tx - joystickCenter.x, dy = ty - joystickCenter.y
   const d = Math.hypot(dx, dy)
+
+  // If thumb exceeds radius, drag the center so thumb stays on the edge
   if (d > DPAD_R) {
     const nx = dx / d, ny = dy / d
     joystickCenter.x = tx - nx * DPAD_R
     joystickCenter.y = ty - ny * DPAD_R
   }
-  joystickThumb = { x: tx, y: ty }
+
+  // Update thumb position (clamped to radius for visual)
+  joystickThumb.x = tx
+  joystickThumb.y = ty
+
+  // Recalculate direction from (possibly moved) center
   const fdx = tx - joystickCenter.x, fdy = ty - joystickCenter.y
   const fd = Math.hypot(fdx, fdy)
   dpad.left = false; dpad.right = false; dpad.up = false; dpad.down = false
@@ -243,7 +259,14 @@ function updateDpad(tx: number, ty: number) {
   if (fd > DPAD_DEAD) {
     const a = Math.atan2(fdy, fdx)
     dpadAngle = a
-    dpad.up = true // signal active
+    if (controlMode === 'direction') {
+      // All directions active — handled in update via dpadAngle
+      dpad.up = true  // signal that stick is active
+    } else {
+      if (a < -0.3 && a > -2.8) dpad.up = true
+      if (a > 2.2 || a < -2.2) dpad.left = true
+      if (a > -0.9 && a < 0.9) dpad.right = true
+    }
   }
 }
 
@@ -263,6 +286,8 @@ canvas.addEventListener('touchstart', e => {
     handleGameOverClick(t0.clientX, t0.clientY)
     return
   }
+
+  // Check pause button first (before joystick/fire)
   {
     const t0 = e.changedTouches[0]
     const pb = pauseBtnBounds()
@@ -271,22 +296,27 @@ canvas.addEventListener('touchstart', e => {
       paused = !paused; return
     }
   }
+
   for (let i = 0; i < e.changedTouches.length; i++) {
     const t = e.changedTouches[i]
-    const hp = polePos()
-    const TOUCH_TOP_LIMIT = canvas.height * 0.3
+    const dp = dpadPos(), fp = firePos(), hp = hyperspacePos()
+    const TOUCH_TOP_LIMIT = canvas.height * 0.3  // only allow controls in bottom 70%
     if (dpadTouchId === null && t.clientX < canvas.width * JOYSTICK_ZONE_X && t.clientY > TOUCH_TOP_LIMIT) {
       dpadTouchId = t.identifier
       joystickCenter = { x: t.clientX, y: t.clientY }
       joystickThumb = { x: t.clientX, y: t.clientY }
+      // No direction yet — finger just landed on center
       dpad.left = false; dpad.right = false; dpad.up = false
-    } else if (hitTest(t.clientX, t.clientY, hp.x, hp.y, POLE_R)) {
-      poleTouchId = t.identifier; poleActive = true; activatePole()
+    } else if (hitTest(t.clientX, t.clientY, hp.x, hp.y, HYPER_R)) {
+      hyperspaceTouchId = t.identifier; hyperspaceActive = true; activateHyperspace()
     } else if (fireTouchId === null && t.clientX > canvas.width * JOYSTICK_ZONE_X && t.clientY > TOUCH_TOP_LIMIT) {
       fireTouchId = t.identifier; fireActive = true; fireOpacity = 1
       firePos_ = { x: t.clientX, y: t.clientY }
-      throwSushi()
-      if (!fireAutoTimer) fireAutoTimer = setInterval(() => { if (fireActive) throwSushi() }, 250)
+      fireCenter = { x: t.clientX, y: t.clientY }
+      fireThumb = { x: t.clientX, y: t.clientY }
+      fireStickActive = false
+      // Don't shoot on touch down — shoot on release or auto-fire after delay
+      if (!fireAutoTimer) fireAutoTimer = setInterval(() => { if (fireActive) shootBullet() }, 180)
     }
   }
 }, { passive: false })
@@ -296,7 +326,26 @@ canvas.addEventListener('touchmove', e => {
   for (let i = 0; i < e.changedTouches.length; i++) {
     const t = e.changedTouches[i]
     if (t.identifier === dpadTouchId) updateDpad(t.clientX, t.clientY)
-    if (t.identifier === fireTouchId) firePos_ = { x: t.clientX, y: t.clientY }
+    if (t.identifier === fireTouchId) {
+      firePos_ = { x: t.clientX, y: t.clientY }
+      fireThumb = { x: t.clientX, y: t.clientY }
+      if (fireCenter) {
+        const fdx = t.clientX - fireCenter.x, fdy = t.clientY - fireCenter.y
+        const fd = Math.hypot(fdx, fdy)
+        if (fd > DPAD_DEAD) {
+          shootAngle = Math.atan2(fdy, fdx)
+          fireStickActive = true
+          // Drag center if thumb exceeds radius
+          if (fd > DPAD_R) {
+            const nx = fdx / fd, ny = fdy / fd
+            fireCenter.x = t.clientX - nx * DPAD_R
+            fireCenter.y = t.clientY - ny * DPAD_R
+          }
+        } else {
+          fireStickActive = false
+        }
+      }
+    }
   }
 }, { passive: false })
 
@@ -305,16 +354,21 @@ canvas.addEventListener('touchend', e => {
   for (let i = 0; i < e.changedTouches.length; i++) {
     const t = e.changedTouches[i]
     if (t.identifier === dpadTouchId) { dpadTouchId = null; joystickCenter = null; dpad.left = false; dpad.right = false; dpad.up = false; dpad.down = false; dpadAngle = null }
-    if (t.identifier === fireTouchId) { fireTouchId = null; fireActive = false; if (fireAutoTimer) { clearInterval(fireAutoTimer); fireAutoTimer = null } }
-    if (t.identifier === poleTouchId) { poleTouchId = null; poleActive = false }
+    if (t.identifier === fireTouchId) {
+      // Shoot on release (tap = shoot last direction)
+      shootBullet()
+      fireTouchId = null; fireActive = false; fireStickActive = false; fireCenter = null
+      if (fireAutoTimer) { clearInterval(fireAutoTimer); fireAutoTimer = null }
+    }
+    if (t.identifier === hyperspaceTouchId) { hyperspaceTouchId = null; hyperspaceActive = false }
   }
 }, { passive: false })
 
 canvas.addEventListener('touchcancel', e => {
   for (let i = 0; i < e.changedTouches.length; i++) {
     if (e.changedTouches[i].identifier === dpadTouchId) { dpadTouchId = null; joystickCenter = null; dpad.left = false; dpad.right = false; dpad.up = false; dpad.down = false; dpadAngle = null }
-    if (e.changedTouches[i].identifier === fireTouchId) { fireTouchId = null; fireActive = false; if (fireAutoTimer) { clearInterval(fireAutoTimer); fireAutoTimer = null } }
-    if (e.changedTouches[i].identifier === poleTouchId) { poleTouchId = null; poleActive = false }
+    if (e.changedTouches[i].identifier === fireTouchId) { fireTouchId = null; fireActive = false; fireStickActive = false; fireCenter = null; if (fireAutoTimer) { clearInterval(fireAutoTimer); fireAutoTimer = null } }
+    if (e.changedTouches[i].identifier === hyperspaceTouchId) { hyperspaceTouchId = null; hyperspaceActive = false }
   }
 })
 
@@ -323,133 +377,136 @@ function toggleControlMode() {
   localStorage.setItem('sushi-bros-ctrl', controlMode)
 }
 
+// Control mode toggle button bounds (set during drawMenu)
 let ctrlToggleBounds = { x: 0, y: 0, w: 0, h: 0 }
 
+// Pause button bounds (top right)
 const PAUSE_BTN_SIZE = 36
 function pauseBtnBounds() {
   return { x: canvas.width - PAUSE_BTN_SIZE - 15, y: 42, w: PAUSE_BTN_SIZE, h: PAUSE_BTN_SIZE }
 }
 
+// Click/tap pause button
 canvas.addEventListener('click', e => {
-  if (state === 'playing') {
-    const pb = pauseBtnBounds()
-    if (e.clientX >= pb.x && e.clientX <= pb.x + pb.w && e.clientY >= pb.y && e.clientY <= pb.y + pb.h) {
-      paused = !paused
-    }
+  if (state !== 'playing') return
+  const pb = pauseBtnBounds()
+  if (e.clientX >= pb.x && e.clientX <= pb.x + pb.w && e.clientY >= pb.y && e.clientY <= pb.y + pb.h) {
+    paused = !paused
   }
-  if (state === 'gameover') handleGameOverClick(e.clientX, e.clientY)
 })
 
 // ─── Actions ───
-function throwSushi() {
-  if (state !== 'playing' || !player.visible || sushis.length >= 10) return
+function shootBullet() {
+  if (state !== 'playing' || !shipVisible || bullets.length >= 8) return
   if (audioCtx.state === 'suspended') audioCtx.resume()
-  sfxSushiThrow()
-  const speed = 7
-  // Throw in facing direction
-  const angle = player.facing
-  sushis.push({
-    pos: { x: player.pos.x + Math.cos(angle) * 16, y: player.pos.y + Math.sin(angle) * 16 },
-    vel: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
-    life: 80
+  sfxLaser()
+  const bSpeed = 8
+  // On touch, use shootAngle (twin-stick); on keyboard, use ship.angle
+  const angle = isTouchDevice ? shootAngle : ship.angle
+  bullets.push({
+    pos: { x: ship.pos.x + Math.cos(angle) * 18, y: ship.pos.y + Math.sin(angle) * 18 },
+    vel: { x: Math.cos(angle) * bSpeed + ship.vel.x * 0.3, y: Math.sin(angle) * bSpeed + ship.vel.y * 0.3 },
+    life: 60
   })
 }
 
-function activatePole() {
-  if (state !== 'playing' || !player.visible || poleSwing) return
+function activateHyperspace() {
+  if (state !== 'playing' || !shipVisible) return
   if (audioCtx.state === 'suspended') audioCtx.resume()
-  sfxPoleSwing()
-  poleSwing = {
-    angle: player.facing - Math.PI * 0.6,
-    timer: 20,
-    maxTimer: 20,
-    radius: 45
+  sfxHyperspace()
+  spawnDestructionParticles(ship.pos.x, ship.pos.y, 8)
+  ship.pos.x = Math.random() * canvas.width
+  ship.pos.y = Math.random() * canvas.height
+  ship.vel.x = 0; ship.vel.y = 0
+  spawnDestructionParticles(ship.pos.x, ship.pos.y, 8)
+  // Small chance of death on hyperspace (classic!)
+  if (Math.random() < 0.1) {
+    spawnDestructionParticles(ship.pos.x, ship.pos.y, 20)
+    sfxExplosion(true)
+    shipVisible = false
+    lives--
+    if (lives <= 0) {
+      state = 'gameover'
+      if (score > highScore) { highScore = score; localStorage.setItem('sushi-bros-hi', String(highScore)) }
+    } else { respawnTimer = 120 }
   }
 }
+
+// ─── Menu animation asteroids ───
+let menuAsteroids: Asteroid[] = []
+function initMenuAsteroids() {
+  menuAsteroids = []
+  for (let i = 0; i < 8; i++) {
+    menuAsteroids.push(makeAsteroid(
+      Math.random() * canvas.width, Math.random() * canvas.height, 'large'
+    ))
+  }
+}
+initMenuAsteroids()
 
 // ─── Game Init ───
 function startGame() {
   if (audioCtx.state === 'suspended') audioCtx.resume()
   state = 'playing'
-  score = 0; lives = 3; distance = 0
-  scrollY = 0; scrollSpeed = 1.2
-  sushis = []; enemies = []; enemyProjectiles = []; particles = []
-  poleSwing = null
-  nextEnemyWorldY = 400
-  boatY = canvas.height * 0.7
-  resetPlayer()
+  score = 0; lives = 3; level = 1
+  bullets = []; asteroids = []; particles = []
+  respawnTimer = 0; shipVisible = true
+  invulnerableTimer = INVULNERABLE_DURATION
+  resetShip()
+  spawnAsteroids(5)
 }
 
-function resetPlayer() {
-  player = {
-    pos: { x: canvas.width / 2, y: canvas.height * 0.7 },
-    vel: { x: 0, y: 0 },
-    radius: 14,
-    facing: -Math.PI / 2, // up
-    invulnTimer: 180,
-    visible: true,
-    respawnTimer: 0
+function resetShip() {
+  ship = {
+    pos: { x: canvas.width / 2, y: canvas.height / 2 },
+    vel: { x: 0, y: 0 }, angle: -Math.PI / 2, thrust: false, radius: 15
+  }
+  shootAngle = -Math.PI / 2
+}
+
+function makeAsteroid(x: number, y: number, size: AsteroidSize): Asteroid {
+  const radius = SIZE_RADIUS[size]
+  const speed = size === 'large' ? 1 + Math.random() * 0.5 : size === 'medium' ? 1.5 + Math.random() * 1 : 2 + Math.random() * 1.5
+  const angle = Math.random() * Math.PI * 2
+  const verts = 8 + Math.floor(Math.random() * 5)
+  const shape = Array.from({ length: verts }, () => 0.7 + Math.random() * 0.6)
+  return {
+    pos: { x, y },
+    vel: { x: Math.cos(angle) * speed, y: Math.sin(angle) * speed },
+    radius, size, rot: Math.random() * Math.PI * 2,
+    rotSpeed: (Math.random() - 0.5) * 0.03,
+    shape
   }
 }
 
-// Track the furthest world-Y we've spawned enemies up to
-let nextEnemyWorldY = 400
-
-function spawnEnemiesAhead() {
-  // Spawn enemies in world space ahead of the camera
-  const cameraTopWorldY = scrollY + canvas.height + 200 // a bit above screen
-  while (nextEnemyWorldY < cameraTopWorldY) {
-    // Spawn 1-3 enemies per "row"
-    const count = 1 + Math.floor(Math.random() * 2)
-    for (let c = 0; c < count; c++) {
-      const types: EnemyType[] = ['crab', 'seagull', 'fisherman']
-      const diff = Math.min(nextEnemyWorldY / 5000, 1)
-      const weights = [
-        1 - diff * 0.3,
-        0.3 + diff * 0.4,
-        diff * 0.5
-      ]
-      const total = weights.reduce((a, b) => a + b)
-      let r = Math.random() * total, type: EnemyType = 'crab'
-      for (let i = 0; i < types.length; i++) {
-        r -= weights[i]
-        if (r <= 0) { type = types[i]; break }
-      }
-
-      const x = 30 + Math.random() * (canvas.width - 60)
-      // Movement scales with distance: static early, very slow later
-      // No downward velocity — they don't come at you
-      const moveFactor = Math.min(nextEnemyWorldY / 8000, 0.6) // max 60% of original speed
-      const enemy: Enemy = {
-        pos: { x, y: 0 }, // screen Y computed from worldY each frame
-        vel: { x: 0, y: 0 },
-        type,
-        hp: type === 'fisherman' ? 3 : type === 'seagull' ? 1 : 2,
-        radius: type === 'fisherman' ? 16 : type === 'seagull' ? 12 : 14,
-        timer: Math.random() * 200, // randomize animation phase
-        shootTimer: 80 + Math.random() * 120,
-        animFrame: 0,
-        worldY: nextEnemyWorldY,
-        baseX: x,
-        moveFactor
-      } as any
-      // Slow lateral drift based on distance
-      if (moveFactor > 0.05) {
-        enemy.vel.x = (Math.random() - 0.5) * 1.5 * moveFactor
-      }
-      enemies.push(enemy)
-    }
-    nextEnemyWorldY += 100 + Math.random() * 150
+function spawnAsteroids(count: number) {
+  for (let i = 0; i < count; i++) {
+    let x: number, y: number
+    do { x = Math.random() * canvas.width; y = Math.random() * canvas.height }
+    while (dist(x, y, ship.pos.x, ship.pos.y) < 150)
+    asteroids.push(makeAsteroid(x, y, 'large'))
   }
 }
 
-function spawnParticles(x: number, y: number, count: number, colors: string[]) {
+function dist(x1: number, y1: number, x2: number, y2: number) {
+  return Math.hypot(x2 - x1, y2 - y1)
+}
+
+function wrap(pos: Vec2) {
+  if (pos.x < -50) pos.x = canvas.width + 50
+  if (pos.x > canvas.width + 50) pos.x = -50
+  if (pos.y < -50) pos.y = canvas.height + 50
+  if (pos.y > canvas.height + 50) pos.y = -50
+}
+
+function spawnDestructionParticles(x: number, y: number, count: number) {
   for (let i = 0; i < count; i++) {
     const a = Math.random() * Math.PI * 2
     const s = Math.random() * 3
+    const colors = ['#ffffff', '#ffaa44', '#ff8800', '#ffcc66', '#eeeeee']
     particles.push({
       pos: { x, y }, vel: { x: Math.cos(a) * s, y: Math.sin(a) * s },
-      life: 15 + Math.random() * 25, maxLife: 40,
+      life: 20 + Math.random() * 30, maxLife: 50,
       color: colors[Math.floor(Math.random() * colors.length)]
     })
   }
@@ -459,257 +516,205 @@ function spawnParticles(x: number, y: number, count: number, colors: string[]) {
 function update() {
   frameCount++
 
-  if (state === 'menu') return
+  if (state === 'menu') {
+    for (const ast of menuAsteroids) {
+      ast.pos.x += ast.vel.x; ast.pos.y += ast.vel.y
+      ast.rot += ast.rotSpeed
+      wrap(ast.pos)
+    }
+    return
+  }
   if (state === 'gameover') return
   if (paused) return
 
-  // Camera follows player: scrollY tracks how far "up" the player has gone
-  // Player's world Y = scrollY + (canvas.height - player.pos.y)
-  // When player moves up (screen Y decreases), world Y increases
-  const playerWorldY = scrollY + (canvas.height - player.pos.y)
-  // Only scroll forward (never backward) — smooth scroll with lerp
-  const targetScrollY = playerWorldY - canvas.height * 0.25
-  if (targetScrollY > scrollY) {
-    // Slow, smooth scroll — lerp toward target
-    scrollY += (targetScrollY - scrollY) * 0.03
-  }
-  distance = Math.floor(scrollY)
-
-  // Respawn logic
-  if (player.respawnTimer > 0) {
-    player.respawnTimer--
-    if (player.respawnTimer === 0) {
-      resetPlayer()
+  if (respawnTimer > 0) {
+    respawnTimer--
+    if (respawnTimer === 0) { resetShip(); shipVisible = true; invulnerableTimer = INVULNERABLE_DURATION }
+    for (const ast of asteroids) {
+      ast.pos.x += ast.vel.x; ast.pos.y += ast.vel.y
+      ast.rot += ast.rotSpeed
+      wrap(ast.pos)
     }
-    updateEnemies()
-    updateProjectiles()
     updateParticles()
     return
   }
 
-  // Determine terrain under player
-  const playerWorldYForTerrain = scrollY + (canvas.height - player.pos.y)
-  const playerTerrain = getTerrainAt(playerWorldYForTerrain)
-  const onWater = playerTerrain === 'water'
+  // Ship controls
+  if (controlMode === 'direction') {
+    // Direction mode: joystick angle steers ship toward that direction and thrusts
+    let dirActive = false
+    let targetAngle = ship.angle
 
-  // Player movement
-  let moveX = 0, moveY = 0
-
-  // Keyboard
-  if (keys['ArrowLeft'] || keys['KeyA']) moveX -= 1
-  if (keys['ArrowRight'] || keys['KeyD']) moveX += 1
-  if (keys['ArrowUp'] || keys['KeyW']) moveY -= 1
-  if (keys['ArrowDown'] || keys['KeyS']) moveY += 1
-
-  // Touch joystick
-  if (dpadAngle !== null) {
-    moveX = Math.cos(dpadAngle)
-    moveY = Math.sin(dpadAngle)
-  }
-
-  // On water (boat): only forward/backward (up/down), no left/right
-  if (onWater) {
-    moveX = 0
-  }
-
-  const moveLen = Math.hypot(moveX, moveY)
-  if (moveLen > 0) {
-    moveX /= moveLen; moveY /= moveLen
-    if (onWater) {
-      // On boat, always face up
-      player.facing = -Math.PI / 2
-    } else {
-      player.facing = Math.atan2(moveY, moveX)
+    // Keyboard: compose direction from WASD/arrows
+    let kx = 0, ky = 0
+    if (keys['ArrowLeft'] || keys['KeyA']) kx -= 1
+    if (keys['ArrowRight'] || keys['KeyD']) kx += 1
+    if (keys['ArrowUp'] || keys['KeyW']) ky -= 1
+    if (keys['ArrowDown'] || keys['KeyS']) ky += 1
+    if (kx !== 0 || ky !== 0) {
+      targetAngle = Math.atan2(ky, kx)
+      dirActive = true
     }
-  }
 
-  const playerSpeed = onWater ? 2.5 : 3.5
-  player.pos.x += moveX * playerSpeed
-  player.pos.y += moveY * playerSpeed
-
-  // Keep player on screen (allow moving to top to scroll forward)
-  player.pos.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.pos.x))
-  player.pos.y = Math.max(player.radius + 20, Math.min(canvas.height - player.radius - 20, player.pos.y))
-
-  // Keyboard actions
-  if (keys['Space']) { keys['Space'] = false; throwSushi() }
-  if (keys['ShiftLeft'] || keys['ShiftRight'] || keys['KeyZ']) {
-    keys['ShiftLeft'] = false; keys['ShiftRight'] = false; keys['KeyZ'] = false
-    activatePole()
-  }
-
-  // Invulnerability
-  if (player.invulnTimer > 0) player.invulnTimer--
-
-  // Pole swing update
-  if (poleSwing) {
-    poleSwing.timer--
-    poleSwing.angle += Math.PI * 1.2 / poleSwing.maxTimer
-    if (poleSwing.timer <= 0) poleSwing = null
-  }
-
-  // Sushi projectiles
-  for (let i = sushis.length - 1; i >= 0; i--) {
-    const s = sushis[i]
-    s.pos.x += s.vel.x; s.pos.y += s.vel.y; s.life--
-    if (s.life <= 0 || s.pos.x < -20 || s.pos.x > canvas.width + 20 || s.pos.y < -20 || s.pos.y > canvas.height + 20)
-      sushis.splice(i, 1)
-  }
-
-  // Spawn enemies ahead in world space
-  spawnEnemiesAhead()
-
-  updateEnemies()
-
-  // Sushi-Enemy collision
-  for (let si = sushis.length - 1; si >= 0; si--) {
-    for (let ei = enemies.length - 1; ei >= 0; ei--) {
-      const s = sushis[si], en = enemies[ei]
-      if (!s || !en) continue
-      if (Math.hypot(s.pos.x - en.pos.x, s.pos.y - en.pos.y) < en.radius + 6) {
-        sushis.splice(si, 1)
-        en.hp--
-        if (en.hp <= 0) {
-          const pts = en.type === 'fisherman' ? 300 : en.type === 'seagull' ? 100 : 150
-          score += pts
-          const colors = en.type === 'crab' ? ['#ff4444', '#ff8844', '#ffaa66'] :
-                         en.type === 'seagull' ? ['#ffffff', '#cccccc', '#aaaaaa'] :
-                         ['#4488ff', '#6699ff', '#88bbff']
-          spawnParticles(en.pos.x, en.pos.y, 12, colors)
-          sfxHit()
-          enemies.splice(ei, 1)
-        } else {
-          spawnParticles(en.pos.x, en.pos.y, 4, ['#ffffff', '#ffff88'])
-        }
-        break
-      }
+    // Touch joystick overrides
+    if (dpadAngle !== null) {
+      targetAngle = dpadAngle
+      dirActive = true
     }
+
+    if (dirActive) {
+      // Smoothly rotate toward target
+      let diff = targetAngle - ship.angle
+      while (diff > Math.PI) diff -= Math.PI * 2
+      while (diff < -Math.PI) diff += Math.PI * 2
+      const turnSpeed = 0.1
+      if (Math.abs(diff) < turnSpeed) ship.angle = targetAngle
+      else ship.angle += Math.sign(diff) * turnSpeed
+    }
+    ship.thrust = dirActive
+  } else {
+    // Classic spin & throttle
+    if (keys['ArrowLeft'] || keys['KeyA'] || dpad.left) ship.angle -= 0.05
+    if (keys['ArrowRight'] || keys['KeyD'] || dpad.right) ship.angle += 0.05
+    ship.thrust = !!(keys['ArrowUp'] || keys['KeyW'] || dpad.up)
   }
 
-  // Pole-Enemy collision
-  if (poleSwing && player.visible) {
-    const px = player.pos.x + Math.cos(poleSwing.angle) * poleSwing.radius * 0.7
-    const py = player.pos.y + Math.sin(poleSwing.angle) * poleSwing.radius * 0.7
-    for (let ei = enemies.length - 1; ei >= 0; ei--) {
-      const en = enemies[ei]
-      if (Math.hypot(px - en.pos.x, py - en.pos.y) < en.radius + 20) {
-        en.hp -= 2
-        if (en.hp <= 0) {
-          score += (en.type === 'fisherman' ? 400 : en.type === 'seagull' ? 150 : 200)
-          const colors = ['#ffaa00', '#ff8800', '#ffcc44']
-          spawnParticles(en.pos.x, en.pos.y, 15, colors)
-          sfxHit()
-          enemies.splice(ei, 1)
+  if (ship.thrust) {
+    thrustTick++
+    if (thrustTick % 4 === 0) sfxThrust()
+    ship.vel.x += Math.cos(ship.angle) * 0.1
+    ship.vel.y += Math.sin(ship.angle) * 0.1
+  } else { thrustTick = 0 }
+
+  ship.vel.x *= 0.99; ship.vel.y *= 0.99
+  const spd = Math.hypot(ship.vel.x, ship.vel.y)
+  if (spd > 6) { ship.vel.x *= 6 / spd; ship.vel.y *= 6 / spd }
+  ship.pos.x += ship.vel.x; ship.pos.y += ship.vel.y
+  wrap(ship.pos)
+
+  if (keys['Space']) { keys['Space'] = false; shootAngle = ship.angle; shootBullet() }
+  if (keys['ShiftLeft'] || keys['ShiftRight']) { keys['ShiftLeft'] = false; keys['ShiftRight'] = false; activateHyperspace() }
+
+  // Bullets
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    const b = bullets[i]
+    b.pos.x += b.vel.x; b.pos.y += b.vel.y; b.life--
+    if (b.life <= 0 || b.pos.x < -10 || b.pos.x > canvas.width + 10 || b.pos.y < -10 || b.pos.y > canvas.height + 10)
+      bullets.splice(i, 1)
+  }
+
+  // Asteroids move
+  for (const ast of asteroids) {
+    ast.pos.x += ast.vel.x; ast.pos.y += ast.vel.y
+    ast.rot += ast.rotSpeed
+    wrap(ast.pos)
+  }
+
+  // Asteroid-Asteroid collisions (elastic bounce)
+  for (let i = 0; i < asteroids.length; i++) {
+    for (let j = i + 1; j < asteroids.length; j++) {
+      const a = asteroids[i], b = asteroids[j]
+      const dx = b.pos.x - a.pos.x, dy = b.pos.y - a.pos.y
+      const d = Math.hypot(dx, dy)
+      const minDist = a.radius * 0.7 + b.radius * 0.7
+      if (d > 0 && d < minDist) {
+        // Normal vector
+        const nx = dx / d, ny = dy / d
+        // Separate overlapping asteroids
+        const overlap = (minDist - d) / 2
+        a.pos.x -= nx * overlap
+        a.pos.y -= ny * overlap
+        b.pos.x += nx * overlap
+        b.pos.y += ny * overlap
+        // Relative velocity along normal
+        const dvx = a.vel.x - b.vel.x, dvy = a.vel.y - b.vel.y
+        const dvn = dvx * nx + dvy * ny
+        // Only resolve if moving toward each other
+        if (dvn > 0) {
+          // Mass proportional to radius squared
+          const ma = a.radius * a.radius, mb = b.radius * b.radius
+          const impulse = (2 * dvn) / (ma + mb)
+          a.vel.x -= impulse * mb * nx
+          a.vel.y -= impulse * mb * ny
+          b.vel.x += impulse * ma * nx
+          b.vel.y += impulse * ma * ny
+          // Small particles on impact
+          const cx = (a.pos.x + b.pos.x) / 2, cy = (a.pos.y + b.pos.y) / 2
+          spawnDestructionParticles(cx, cy, 3)
         }
       }
     }
   }
 
-  // Enemy-Player collision
-  if (player.visible && player.invulnTimer <= 0) {
-    for (const en of enemies) {
-      if (Math.hypot(player.pos.x - en.pos.x, player.pos.y - en.pos.y) < player.radius + en.radius - 4) {
-        playerDamage()
+  // Bullet-Asteroid collision
+  for (let bi = bullets.length - 1; bi >= 0; bi--) {
+    for (let ai = asteroids.length - 1; ai >= 0; ai--) {
+      const b = bullets[bi], ast = asteroids[ai]
+      if (!b || !ast) continue
+      if (dist(b.pos.x, b.pos.y, ast.pos.x, ast.pos.y) < ast.radius) {
+        bullets.splice(bi, 1)
+        score += SIZE_SCORE[ast.size]
+        spawnDestructionParticles(ast.pos.x, ast.pos.y, 10)
+        sfxExplosion(ast.size === 'large')
+
+        if (ast.size === 'large') {
+          for (let k = 0; k < 2; k++) {
+            const child = makeAsteroid(ast.pos.x, ast.pos.y, 'medium')
+            child.vel.x = (Math.random() - 0.5) * 4
+            child.vel.y = (Math.random() - 0.5) * 4
+            asteroids.push(child)
+          }
+        } else if (ast.size === 'medium') {
+          for (let k = 0; k < 2; k++) {
+            const child = makeAsteroid(ast.pos.x, ast.pos.y, 'small')
+            child.vel.x = (Math.random() - 0.5) * 5
+            child.vel.y = (Math.random() - 0.5) * 5
+            asteroids.push(child)
+          }
+        }
+        asteroids.splice(ai, 1)
         break
       }
     }
   }
 
-  // Enemy projectile - player collision
-  if (player.visible && player.invulnTimer <= 0) {
-    for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
-      const ep = enemyProjectiles[i]
-      if (Math.hypot(player.pos.x - ep.pos.x, player.pos.y - ep.pos.y) < player.radius + 5) {
-        enemyProjectiles.splice(i, 1)
-        playerDamage()
+  // Invulnerability countdown
+  if (invulnerableTimer > 0) invulnerableTimer--
+
+  // Ship-Asteroid collision
+  if (shipVisible && invulnerableTimer <= 0) {
+    for (const ast of asteroids) {
+      if (dist(ship.pos.x, ship.pos.y, ast.pos.x, ast.pos.y) < ast.radius + ship.radius - 5) {
+        spawnDestructionParticles(ship.pos.x, ship.pos.y, 20)
+        sfxExplosion(true)
+        shipVisible = false
+        lives--
+        if (lives <= 0) {
+          state = 'gameover'
+          if (score > highScore) { highScore = score; localStorage.setItem('sushi-bros-hi', String(highScore)) }
+        } else { respawnTimer = 120 }
         break
       }
     }
   }
 
-  updateProjectiles()
+  if (asteroids.length === 0) { level++; spawnAsteroids(4 + level) }
 
-  // Opacity fades
-  if (dpadTouchId !== null) dpadOpacity = 1
-  else if (dpadOpacity > 0.35) { dpadOpacity -= 0.02; if (dpadOpacity < 0.35) dpadOpacity = 0.35 }
-  if (fireActive) fireOpacity = 1
-  else if (fireOpacity > 0.35) { fireOpacity -= 0.02; if (fireOpacity < 0.35) fireOpacity = 0.35 }
+  // Fire button opacity fade
+  // D-pad opacity fade
+  if (dpadTouchId !== null) { dpadOpacity = 1 }
+  else if (dpadOpacity > 0.1) {
+    dpadOpacity -= 0.02
+    if (dpadOpacity <= 0.35) { dpadOpacity = 0.35 }
+  }
+
+  if (fireActive) { fireOpacity = 1 }
+  else if (fireOpacity > 0.1) {
+    fireOpacity -= 0.02  // fade over ~45 frames (~0.75s)
+    if (fireOpacity <= 0.35) { fireOpacity = 0.35 }
+  }
 
   updateParticles()
-}
-
-function playerDamage() {
-  spawnParticles(player.pos.x, player.pos.y, 20, ['#ffffff', '#ff4444', '#ffaa00'])
-  sfxPlayerHit()
-  player.visible = false
-  lives--
-  if (lives <= 0) {
-    state = 'gameover'
-    if (score > highScore) { highScore = score; localStorage.setItem('sushi-bros-hi', String(highScore)) }
-  } else {
-    player.respawnTimer = 90
-  }
-}
-
-function updateEnemies() {
-  for (let i = enemies.length - 1; i >= 0; i--) {
-    const en = enemies[i]
-    en.timer++
-    en.animFrame++
-
-    // Convert world Y to screen Y
-    en.pos.y = canvas.height - (en.worldY - scrollY)
-
-    // Lateral movement (slow, based on moveFactor)
-    if (en.moveFactor > 0.05) {
-      // Crabs: gentle side-to-side
-      if (en.type === 'crab') {
-        en.pos.x = en.baseX + Math.sin(en.timer * 0.015 * en.moveFactor) * 30 * en.moveFactor
-      }
-      // Seagulls: gentle sine drift
-      else if (en.type === 'seagull') {
-        en.pos.x = en.baseX + Math.sin(en.timer * 0.02 * en.moveFactor) * 40 * en.moveFactor
-      }
-      // Fisherman: very subtle sway
-      else if (en.type === 'fisherman') {
-        en.pos.x = en.baseX + Math.sin(en.timer * 0.01 * en.moveFactor) * 15 * en.moveFactor
-      }
-    } else {
-      en.pos.x = en.baseX
-    }
-
-    // Clamp to screen width
-    en.pos.x = Math.max(en.radius, Math.min(canvas.width - en.radius, en.pos.x))
-
-    // Fisherman shoot (only when on screen and close-ish)
-    if (en.type === 'fisherman' && player.visible && en.pos.y > -20 && en.pos.y < canvas.height + 20) {
-      en.shootTimer--
-      if (en.shootTimer <= 0) {
-        en.shootTimer = 120 + Math.random() * 80
-        const dx = player.pos.x - en.pos.x, dy = player.pos.y - en.pos.y
-        const d = Math.hypot(dx, dy)
-        if (d > 0 && d < 300) { // only shoot if player is nearby
-          enemyProjectiles.push({
-            pos: { x: en.pos.x, y: en.pos.y },
-            vel: { x: dx / d * 2.5, y: dy / d * 2.5 },
-            life: 100
-          })
-        }
-      }
-    }
-
-    // Remove if scrolled well past (below screen)
-    if (en.pos.y > canvas.height + 100) enemies.splice(i, 1)
-  }
-}
-
-function updateProjectiles() {
-  for (let i = enemyProjectiles.length - 1; i >= 0; i--) {
-    const p = enemyProjectiles[i]
-    p.pos.x += p.vel.x; p.pos.y += p.vel.y; p.life--
-    if (p.life <= 0 || p.pos.x < -10 || p.pos.x > canvas.width + 10 || p.pos.y < -10 || p.pos.y > canvas.height + 10)
-      enemyProjectiles.splice(i, 1)
-  }
 }
 
 function updateParticles() {
@@ -721,348 +726,85 @@ function updateParticles() {
 }
 
 // ─── Draw ───
-function drawScrollingBackground() {
-  // Draw terrain rows
-  const rowH = 4 // pixel height per row
-  for (let screenY = 0; screenY < canvas.height; screenY += rowH) {
-    // World Y: bottom of screen = scrollY, top = scrollY + canvas.height
-    const worldY = scrollY + (canvas.height - screenY)
-    const baseColor = getTerrainColor(worldY)
-    ctx.fillStyle = baseColor
-    ctx.fillRect(0, screenY, canvas.width, rowH + 1)
-  }
-
-  // Water wave lines
-  for (let screenY = 0; screenY < canvas.height; screenY += 3) {
-    const worldY = scrollY + (canvas.height - screenY)
-    if (getTerrainAt(worldY) === 'water') {
-      const waveOffset = Math.sin((worldY * 0.02) + frameCount * 0.03) * 15
-      ctx.strokeStyle = 'rgba(100,180,255,0.15)'
-      ctx.lineWidth = 1
-      ctx.beginPath()
-      for (let x = 0; x < canvas.width; x += 20) {
-        const wy = screenY + Math.sin((x + waveOffset) * 0.03 + worldY * 0.01) * 3
-        if (x === 0) ctx.moveTo(x, wy); else ctx.lineTo(x, wy)
-      }
-      ctx.stroke()
-    }
-  }
-
-  // Sand dots/pebbles
-  const sandSeed = Math.floor(scrollY / 50)
-  for (let i = 0; i < 20; i++) {
-    const hash = (sandSeed + i * 7919) % 10007
-    const worldY = (hash % 500) + scrollY - 100
-    if (getTerrainAt(worldY) === 'sand') {
-      const screenYp = canvas.height - (worldY - scrollY)
-      if (screenYp > 0 && screenYp < canvas.height) {
-        const sx = (hash * 3) % canvas.width
-        ctx.fillStyle = 'rgba(180,150,80,0.3)'
-        ctx.beginPath()
-        ctx.arc(sx, screenYp, 2, 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
-  }
-
-  // Grass tufts
-  for (let i = 0; i < 30; i++) {
-    const hash = (sandSeed + i * 6271) % 10007
-    const worldY = (hash % 600) + scrollY - 100
-    if (getTerrainAt(worldY) === 'grass') {
-      const screenYp = canvas.height - (worldY - scrollY)
-      if (screenYp > 0 && screenYp < canvas.height) {
-        const sx = (hash * 5) % canvas.width
-        ctx.fillStyle = `rgba(20,${100 + (hash % 60)},20,0.4)`
-        ctx.beginPath()
-        ctx.arc(sx, screenYp, 3 + (hash % 3), 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
-  }
-
-  // Trees on grass (simple circles with trunk)
-  for (let i = 0; i < 10; i++) {
-    const hash = (Math.floor(scrollY / 300) + i * 4517) % 10007
-    const worldY = (hash % 800) + scrollY - 200
-    if (getTerrainAt(worldY) === 'grass') {
-      const screenYp = canvas.height - (worldY - scrollY)
-      if (screenYp > -20 && screenYp < canvas.height + 20) {
-        const sx = (hash * 7) % canvas.width
-        // Trunk
-        ctx.fillStyle = '#5a3a1a'
-        ctx.fillRect(sx - 3, screenYp - 5, 6, 12)
-        // Canopy
-        ctx.fillStyle = '#1a6a1a'
-        ctx.beginPath()
-        ctx.arc(sx, screenYp - 10, 10 + (hash % 5), 0, Math.PI * 2)
-        ctx.fill()
-      }
-    }
-  }
-
-  // Boats on water (near start)
-  if (scrollY < 1500) {
-    for (let i = 0; i < 3; i++) {
-      const bWorldY = 200 + i * 250
-      const bScreenY = canvas.height - (bWorldY - scrollY)
-      if (bScreenY > -30 && bScreenY < canvas.height + 30) {
-        const bx = 80 + i * (canvas.width - 160) / 2
-        drawBoat(bx, bScreenY)
-      }
-    }
-  }
-}
-
-function drawBoat(x: number, y: number) {
-  ctx.save()
-  ctx.translate(x, y)
-  // Hull
-  ctx.fillStyle = '#8B4513'
-  ctx.beginPath()
-  ctx.moveTo(-20, 0); ctx.lineTo(-15, 10); ctx.lineTo(15, 10); ctx.lineTo(20, 0)
-  ctx.closePath(); ctx.fill()
-  // Mast
-  ctx.fillStyle = '#654321'
-  ctx.fillRect(-1, -20, 2, 20)
-  // Sail
-  ctx.fillStyle = '#f5f5dc'
-  ctx.beginPath()
-  ctx.moveTo(0, -18); ctx.lineTo(12, -6); ctx.lineTo(0, -4)
-  ctx.closePath(); ctx.fill()
-  ctx.restore()
-}
-
-function drawPlayer() {
-  if (!player.visible) return
-  if (player.invulnTimer > 0 && Math.floor(frameCount / 4) % 2 === 0) return
-
-  const px = player.pos.x, py = player.pos.y
-  
-  // Check if player is on water
-  const pwY = scrollY + (canvas.height - py)
-  const isOnWater = getTerrainAt(pwY) === 'water'
-
-  // Draw boat under player when on water
-  if (isOnWater) {
-    ctx.save()
-    ctx.translate(px, py)
-    // Boat hull
-    ctx.fillStyle = '#8B4513'
-    ctx.beginPath()
-    ctx.moveTo(-22, 8); ctx.lineTo(-16, 18); ctx.lineTo(16, 18); ctx.lineTo(22, 8)
-    ctx.closePath(); ctx.fill()
-    // Boat deck
-    ctx.fillStyle = '#A0522D'
-    ctx.fillRect(-14, 6, 28, 4)
-    // Gentle bob
-    const bob = Math.sin(frameCount * 0.04) * 1.5
-    ctx.translate(0, bob)
-    // Wake lines behind boat
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)'
-    ctx.lineWidth = 1
-    ctx.beginPath()
-    ctx.moveTo(-10, 20); ctx.lineTo(-18, 32)
-    ctx.moveTo(10, 20); ctx.lineTo(18, 32)
-    ctx.stroke()
-    ctx.restore()
-  }
-
-  ctx.save()
-  ctx.translate(px, py)
-  // Bob on water
-  if (isOnWater) {
-    ctx.translate(0, Math.sin(frameCount * 0.04) * 1.5 - 4)
-  }
-
-  // Body (white chef outfit)
-  ctx.fillStyle = '#ffffff'
-  ctx.beginPath()
-  ctx.arc(0, 2, 12, 0, Math.PI * 2)
-  ctx.fill()
-  ctx.strokeStyle = '#cccccc'
-  ctx.lineWidth = 1
-  ctx.stroke()
-
-  // Head
-  ctx.fillStyle = '#ffcc88'
-  ctx.beginPath()
-  ctx.arc(0, -6, 8, 0, Math.PI * 2)
-  ctx.fill()
-
-  // Chef hat
-  ctx.fillStyle = '#ffffff'
-  ctx.fillRect(-6, -18, 12, 10)
-  ctx.beginPath()
-  ctx.arc(0, -18, 7, Math.PI, 0)
-  ctx.fill()
-  ctx.strokeStyle = '#dddddd'
-  ctx.lineWidth = 0.5
-  ctx.beginPath()
-  ctx.arc(0, -18, 7, Math.PI, 0)
-  ctx.stroke()
-
-  // Eyes (face toward movement direction)
-  const ex = Math.cos(player.facing) * 2
-  const ey = Math.sin(player.facing) * 2
+function drawBackground() {
   ctx.fillStyle = '#000000'
-  ctx.beginPath()
-  ctx.arc(-3 + ex * 0.5, -7 + ey * 0.5, 1.5, 0, Math.PI * 2); ctx.fill()
-  ctx.beginPath()
-  ctx.arc(3 + ex * 0.5, -7 + ey * 0.5, 1.5, 0, Math.PI * 2); ctx.fill()
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
 
-  ctx.restore()
-
-  // Pole swing visual
-  if (poleSwing) {
-    const endX = px + Math.cos(poleSwing.angle) * poleSwing.radius
-    const endY = py + Math.sin(poleSwing.angle) * poleSwing.radius
-    // Pole line
-    ctx.strokeStyle = '#8B6914'
-    ctx.lineWidth = 3
-    ctx.beginPath()
-    ctx.moveTo(px, py); ctx.lineTo(endX, endY)
-    ctx.stroke()
-    // Hook
-    ctx.strokeStyle = '#cccccc'
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.arc(endX, endY, 5, 0, Math.PI)
-    ctx.stroke()
-    // Swoosh arc
-    const progress = 1 - poleSwing.timer / poleSwing.maxTimer
-    ctx.strokeStyle = `rgba(255,255,200,${0.5 * (1 - progress)})`
-    ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.arc(px, py, poleSwing.radius, poleSwing.angle - 0.5, poleSwing.angle)
-    ctx.stroke()
+  // Stars
+  for (const s of stars) {
+    const twinkle = 0.7 + Math.sin(frameCount * 0.02 + s.x * 100) * 0.3
+    ctx.fillStyle = `rgba(255,255,255,${s.brightness * twinkle})`
+    ctx.fillRect(s.x * canvas.width, s.y * canvas.height, s.size, s.size)
   }
 }
 
-function drawEnemy(en: Enemy) {
+function drawAsteroid(ast: Asteroid) {
   ctx.save()
-  ctx.translate(en.pos.x, en.pos.y)
+  ctx.translate(ast.pos.x, ast.pos.y)
+  ctx.rotate(ast.rot)
 
-  if (en.type === 'crab') {
-    // Red crab body
-    ctx.fillStyle = '#cc3333'
+  const verts = ast.shape.length
+  ctx.beginPath()
+  for (let i = 0; i <= verts; i++) {
+    const angle = (i % verts) / verts * Math.PI * 2
+    const r = ast.radius * ast.shape[i % verts]
+    const x = Math.cos(angle) * r
+    const y = Math.sin(angle) * r
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y)
+  }
+  ctx.closePath()
+
+  ctx.fillStyle = ast.size === 'large' ? '#665544' : ast.size === 'medium' ? '#887766' : '#998877'
+  ctx.fill()
+  ctx.strokeStyle = '#aaa'
+  ctx.lineWidth = 1.5
+  ctx.stroke()
+
+  ctx.restore()
+}
+
+function drawShip() {
+  if (!shipVisible) return
+  // Flash when invulnerable (toggle every 4 frames)
+  if (invulnerableTimer > 0 && Math.floor(frameCount / 4) % 2 === 0) return
+  ctx.save()
+  ctx.translate(ship.pos.x, ship.pos.y)
+  ctx.rotate(ship.angle)
+
+  // Classic triangular ship
+  ctx.beginPath()
+  ctx.moveTo(18, 0)
+  ctx.lineTo(-12, -10)
+  ctx.lineTo(-8, 0)
+  ctx.lineTo(-12, 10)
+  ctx.closePath()
+  ctx.strokeStyle = '#ffffff'
+  ctx.lineWidth = 2
+  ctx.stroke()
+
+  // Thrust flame
+  if (ship.thrust) {
     ctx.beginPath()
-    ctx.ellipse(0, 0, 14, 10, 0, 0, Math.PI * 2)
+    ctx.moveTo(-10, -5)
+    ctx.lineTo(-18 - Math.random() * 10, 0)
+    ctx.lineTo(-10, 5)
+    ctx.closePath()
+    ctx.fillStyle = Math.random() > 0.5 ? '#ff4400' : '#ffaa00'
     ctx.fill()
-    // Claws
-    const clawAnim = Math.sin(en.animFrame * 0.1) * 0.3
-    ctx.fillStyle = '#ee4444'
-    ctx.beginPath()
-    ctx.arc(-16, -4, 6, 0, Math.PI * 2); ctx.fill()
-    ctx.beginPath()
-    ctx.arc(16, -4, 6, 0, Math.PI * 2); ctx.fill()
-    // Eyes
-    ctx.fillStyle = '#000000'
-    ctx.beginPath(); ctx.arc(-4, -5, 2, 0, Math.PI * 2); ctx.fill()
-    ctx.beginPath(); ctx.arc(4, -5, 2, 0, Math.PI * 2); ctx.fill()
-    // Legs
-    ctx.strokeStyle = '#cc3333'; ctx.lineWidth = 1.5
-    for (let s = -1; s <= 1; s += 2) {
-      for (let j = 0; j < 3; j++) {
-        const lx = s * (6 + j * 4), ly = 6
-        ctx.beginPath()
-        ctx.moveTo(lx, 4)
-        ctx.lineTo(lx + s * 5, ly + Math.sin(en.animFrame * 0.15 + j) * 2)
-        ctx.stroke()
-      }
-    }
-  } else if (en.type === 'seagull') {
-    // White body
-    ctx.fillStyle = '#eeeeee'
-    ctx.beginPath()
-    ctx.ellipse(0, 0, 8, 6, 0, 0, Math.PI * 2)
-    ctx.fill()
-    // Wings
-    const wingFlap = Math.sin(en.animFrame * 0.15) * 15
-    ctx.fillStyle = '#dddddd'
-    ctx.beginPath()
-    ctx.moveTo(-5, 0)
-    ctx.lineTo(-18, -wingFlap)
-    ctx.lineTo(-12, 2)
-    ctx.closePath(); ctx.fill()
-    ctx.beginPath()
-    ctx.moveTo(5, 0)
-    ctx.lineTo(18, -wingFlap)
-    ctx.lineTo(12, 2)
-    ctx.closePath(); ctx.fill()
-    // Beak
-    ctx.fillStyle = '#ff8800'
-    ctx.beginPath()
-    ctx.moveTo(0, -4); ctx.lineTo(-2, -8); ctx.lineTo(2, -8)
-    ctx.closePath(); ctx.fill()
-    // Eye
-    ctx.fillStyle = '#000000'
-    ctx.beginPath(); ctx.arc(0, -2, 1.5, 0, Math.PI * 2); ctx.fill()
-  } else if (en.type === 'fisherman') {
-    // Body (blue jacket)
-    ctx.fillStyle = '#3355aa'
-    ctx.beginPath()
-    ctx.arc(0, 2, 13, 0, Math.PI * 2)
-    ctx.fill()
-    // Head
-    ctx.fillStyle = '#dda877'
-    ctx.beginPath()
-    ctx.arc(0, -7, 8, 0, Math.PI * 2)
-    ctx.fill()
-    // Hat (bucket hat)
-    ctx.fillStyle = '#556633'
-    ctx.fillRect(-9, -14, 18, 5)
-    ctx.fillRect(-7, -18, 14, 5)
-    // Eyes (angry)
-    ctx.fillStyle = '#000000'
-    ctx.fillRect(-5, -8, 3, 2)
-    ctx.fillRect(2, -8, 3, 2)
-    // Fishing rod
-    ctx.strokeStyle = '#8B6914'; ctx.lineWidth = 2
-    ctx.beginPath()
-    ctx.moveTo(10, 0); ctx.lineTo(18, -15)
-    ctx.stroke()
-    ctx.strokeStyle = '#aaaaaa'; ctx.lineWidth = 0.5
-    ctx.beginPath()
-    ctx.moveTo(18, -15); ctx.lineTo(20, -10)
-    ctx.stroke()
   }
 
   ctx.restore()
 }
 
-function drawSushis() {
-  for (const s of sushis) {
-    ctx.save()
-    ctx.translate(s.pos.x, s.pos.y)
-    const rot = frameCount * 0.15
-    ctx.rotate(rot)
-    // Rice base (white oval)
-    ctx.fillStyle = '#ffffff'
+function drawBullets() {
+  for (const b of bullets) {
+    ctx.fillStyle = '#ffff88'
     ctx.beginPath()
-    ctx.ellipse(0, 0, 7, 4, 0, 0, Math.PI * 2)
+    ctx.arc(b.pos.x, b.pos.y, 2, 0, Math.PI * 2)
     ctx.fill()
-    // Fish topping (orange/salmon)
-    ctx.fillStyle = '#ff7744'
+    ctx.fillStyle = 'rgba(255,255,200,0.3)'
     ctx.beginPath()
-    ctx.ellipse(0, -2, 6, 3, 0, 0, Math.PI * 2)
-    ctx.fill()
-    // Nori strip
-    ctx.fillStyle = '#1a3a1a'
-    ctx.fillRect(-2, -4, 4, 8)
-    ctx.restore()
-  }
-}
-
-function drawEnemyProjectiles() {
-  for (const p of enemyProjectiles) {
-    ctx.fillStyle = '#ff4444'
-    ctx.beginPath()
-    ctx.arc(p.pos.x, p.pos.y, 3, 0, Math.PI * 2)
-    ctx.fill()
-    ctx.fillStyle = 'rgba(255,100,100,0.3)'
-    ctx.beginPath()
-    ctx.arc(p.pos.x, p.pos.y, 6, 0, Math.PI * 2)
+    ctx.arc(b.pos.x, b.pos.y, 4, 0, Math.PI * 2)
     ctx.fill()
   }
 }
@@ -1070,51 +812,60 @@ function drawEnemyProjectiles() {
 function drawParticles() {
   for (const p of particles) {
     const a = p.life / p.maxLife
-    ctx.globalAlpha = a
-    ctx.fillStyle = p.color
-    ctx.fillRect(p.pos.x - 1.5, p.pos.y - 1.5, 3, 3)
+    ctx.fillStyle = p.color + Math.floor(a * 200).toString(16).padStart(2, '0')
+    ctx.fillRect(p.pos.x - 1, p.pos.y - 1, 3, 3)
   }
-  ctx.globalAlpha = 1
 }
 
 function drawHUD() {
   const fontSize = isPortrait ? 16 : 18
   ctx.fillStyle = '#ffffff'; ctx.font = `${fontSize}px monospace`
   ctx.textAlign = 'left'; ctx.fillText(`SCORE: ${score}`, 15, 30)
-  ctx.textAlign = 'right'; ctx.fillText(`HI: ${highScore}`, canvas.width - 55, 30)
+  ctx.textAlign = 'right'; ctx.fillText(`HI: ${highScore}`, canvas.width - 15, 30)
   ctx.textAlign = 'left'
 
-  // Lives as sushi icons
+  // Lives as small ship icons
   for (let i = 0; i < lives; i++) {
-    const lx = 20 + i * 22, ly = 48
-    ctx.fillStyle = '#ff7744'
-    ctx.beginPath(); ctx.arc(lx, ly, 6, 0, Math.PI * 2); ctx.fill()
-    ctx.fillStyle = '#ffffff'
-    ctx.beginPath(); ctx.arc(lx, ly + 2, 5, 0, Math.PI * 2); ctx.fill()
+    const lx = 20 + i * 24, ly = 50
+    ctx.save()
+    ctx.translate(lx, ly)
+    ctx.rotate(-Math.PI / 2)
+    ctx.beginPath()
+    ctx.moveTo(8, 0)
+    ctx.lineTo(-5, -5)
+    ctx.lineTo(-3, 0)
+    ctx.lineTo(-5, 5)
+    ctx.closePath()
+    ctx.strokeStyle = '#ffffff'
+    ctx.lineWidth = 1.5
+    ctx.stroke()
+    ctx.restore()
   }
 
-  // Distance
+  // Level indicator
   ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
   ctx.textAlign = 'center'
-  ctx.fillText(`${distance}m`, canvas.width / 2, 25)
+  ctx.fillText(`WAVE ${level}`, canvas.width / 2, 25)
 
-  // Terrain indicator
-  const terrain = getTerrainAt(scrollY + canvas.height / 2)
-  const terrainName = terrain === 'water' ? '🌊 OCEAN' : terrain === 'sand' ? '🏖 BEACH' : '🌴 ISLAND'
-  ctx.fillText(terrainName, canvas.width / 2, 42)
-
-  // Pause button
+  // Pause button (top right)
   const pb = pauseBtnBounds()
   const cx = pb.x + pb.w / 2, cy = pb.y + pb.h / 2
   ctx.strokeStyle = `rgba(255,255,255,${paused ? 0.9 : 0.4})`
   ctx.lineWidth = 1.5
-  ctx.beginPath(); ctx.arc(cx, cy, pb.w / 2, 0, Math.PI * 2); ctx.stroke()
+  ctx.beginPath()
+  ctx.arc(cx, cy, pb.w / 2, 0, Math.PI * 2)
+  ctx.stroke()
   if (paused) {
+    // Draw play triangle
     ctx.fillStyle = 'rgba(255,255,255,0.9)'
     ctx.beginPath()
-    ctx.moveTo(cx - 5, cy - 8); ctx.lineTo(cx - 5, cy + 8); ctx.lineTo(cx + 8, cy)
-    ctx.closePath(); ctx.fill()
+    ctx.moveTo(cx - 5, cy - 8)
+    ctx.lineTo(cx - 5, cy + 8)
+    ctx.lineTo(cx + 8, cy)
+    ctx.closePath()
+    ctx.fill()
   } else {
+    // Draw pause bars
     ctx.fillStyle = 'rgba(255,255,255,0.5)'
     ctx.fillRect(cx - 6, cy - 7, 4, 14)
     ctx.fillRect(cx + 2, cy - 7, 4, 14)
@@ -1127,12 +878,15 @@ function drawTouchControls() {
   {
     const dp = joystickCenter || dpadPos()
     const alpha = dpadOpacity
+
+    // Outer ring
     ctx.beginPath()
     ctx.arc(dp.x, dp.y, DPAD_R, 0, Math.PI * 2)
     ctx.strokeStyle = `rgba(255,255,255,${0.2 * alpha})`; ctx.lineWidth = 2; ctx.stroke()
     ctx.fillStyle = `rgba(255,255,255,${0.04 * alpha})`; ctx.fill()
 
     if (joystickCenter) {
+      // Thumb nub — clamped to radius
       const tdx = joystickThumb.x - dp.x, tdy = joystickThumb.y - dp.y
       const td = Math.hypot(tdx, tdy)
       const clamp = Math.min(td, DPAD_R)
@@ -1144,95 +898,106 @@ function drawTouchControls() {
       ctx.strokeStyle = `rgba(255,255,255,${0.4 * alpha})`; ctx.lineWidth = 1.5; ctx.stroke()
     }
 
+    // Direction arrows
     const drawArrow = (angle: number, active: boolean) => {
-      ctx.save(); ctx.translate(dp.x, dp.y); ctx.rotate(angle)
+      ctx.save()
+      ctx.translate(dp.x, dp.y)
+      ctx.rotate(angle)
       ctx.beginPath()
-      ctx.moveTo(DPAD_R - 12, 0); ctx.lineTo(DPAD_R - 28, -10); ctx.lineTo(DPAD_R - 28, 10)
+      ctx.moveTo(DPAD_R - 12, 0)
+      ctx.lineTo(DPAD_R - 28, -10)
+      ctx.lineTo(DPAD_R - 28, 10)
       ctx.closePath()
       ctx.fillStyle = active ? `rgba(255,255,255,${0.7 * alpha})` : `rgba(255,255,255,${0.25 * alpha})`
-      ctx.fill(); ctx.restore()
+      ctx.fill()
+      ctx.restore()
     }
     drawArrow(-Math.PI / 2, dpad.up)
     drawArrow(Math.PI, dpad.left)
     drawArrow(0, dpad.right)
-    drawArrow(Math.PI / 2, dpad.down)
+    if (controlMode === 'direction') {
+      drawArrow(Math.PI / 2, dpad.down)
+    }
   }
 
-  const fp = firePos()
-  const fo = fireOpacity
+  const fp = fireCenter || firePos()
+  const fo = fireOpacity  // 0.1..1
   {
     const alpha = fireActive ? 1 : fo
+
+    // Outer ring (same size as left joystick)
     ctx.beginPath()
-    ctx.arc(fp.x, fp.y, BTN_R, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(255,120,68,${(fireActive ? 0.35 : 0.1) * alpha})`; ctx.fill()
-    ctx.strokeStyle = `rgba(255,120,68,${(fireActive ? 0.9 : 0.4) * alpha})`
-    ctx.lineWidth = 2.5; ctx.stroke()
-    ctx.fillStyle = `rgba(255,255,255,${(fireActive ? 0.95 : 0.5) * alpha})`
-    ctx.font = 'bold 12px monospace'; ctx.textAlign = 'center'
-    ctx.fillText('🍣', fp.x, fp.y - 2)
-    ctx.fillText('SUSHI', fp.x, fp.y + 14)
+    ctx.arc(fp.x, fp.y, DPAD_R, 0, Math.PI * 2)
+    ctx.strokeStyle = `rgba(255,100,100,${0.2 * alpha})`; ctx.lineWidth = 2; ctx.stroke()
+    ctx.fillStyle = `rgba(255,100,100,${0.04 * alpha})`; ctx.fill()
+
+    // Direction indicator line showing current shoot angle
+    const indicatorLen = DPAD_R - 8
+    ctx.beginPath()
+    ctx.moveTo(fp.x, fp.y)
+    ctx.lineTo(fp.x + Math.cos(shootAngle) * indicatorLen, fp.y + Math.sin(shootAngle) * indicatorLen)
+    ctx.strokeStyle = `rgba(255,150,150,${0.3 * alpha})`; ctx.lineWidth = 1.5; ctx.stroke()
+
+    if (fireCenter && fireActive) {
+      // Thumb nub
+      const tdx = fireThumb.x - fp.x, tdy = fireThumb.y - fp.y
+      const td = Math.hypot(tdx, tdy)
+      const clamp = Math.min(td, DPAD_R)
+      const nx = td > 0 ? tdx / td * clamp : 0
+      const ny = td > 0 ? tdy / td * clamp : 0
+      ctx.beginPath()
+      ctx.arc(fp.x + nx, fp.y + ny, 18, 0, Math.PI * 2)
+      ctx.fillStyle = `rgba(255,150,150,${0.2 * alpha})`; ctx.fill()
+      ctx.strokeStyle = `rgba(255,150,150,${0.4 * alpha})`; ctx.lineWidth = 1.5; ctx.stroke()
+    }
+
+    // Label
+    ctx.fillStyle = `rgba(255,200,200,${(fireActive ? 0.95 : 0.5) * alpha})`
+    ctx.font = 'bold 10px monospace'; ctx.textAlign = 'center'
+    ctx.fillText('AIM', fp.x, fp.y + DPAD_R + 14)
   }
 
-  const hp = polePos()
+  // Hyperspace button — fades with fire button
+  const hp = hyperspacePos()
   {
-    const alpha = poleActive ? 1 : fo
+    const alpha = hyperspaceActive ? 1 : fo
     ctx.beginPath()
-    ctx.arc(hp.x, hp.y, POLE_R, 0, Math.PI * 2)
-    ctx.fillStyle = `rgba(139,105,20,${(poleActive ? 0.35 : 0.18) * alpha})`; ctx.fill()
-    ctx.strokeStyle = `rgba(139,105,20,${(poleActive ? 0.9 : 0.55) * alpha})`
+    ctx.arc(hp.x, hp.y, HYPER_R, 0, Math.PI * 2)
+    ctx.fillStyle = `rgba(100,150,255,${(hyperspaceActive ? 0.35 : 0.18) * alpha})`
+    ctx.fill()
+    ctx.strokeStyle = `rgba(100,150,255,${(hyperspaceActive ? 0.9 : 0.55) * alpha})`
     ctx.lineWidth = 2; ctx.stroke()
-    ctx.fillStyle = `rgba(255,255,255,${(poleActive ? 0.95 : 0.65) * alpha})`
+    ctx.fillStyle = `rgba(150,200,255,${(hyperspaceActive ? 0.95 : 0.65) * alpha})`
     ctx.font = 'bold 9px monospace'; ctx.textAlign = 'center'
-    ctx.fillText('POLE', hp.x, hp.y + 3)
+    ctx.fillText('HYPER', hp.x, hp.y + 3)
   }
 }
 
 function drawMenu() {
-  // Ocean background
-  ctx.fillStyle = '#0a1a3a'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-
-  // Animated waves
-  for (let y = 0; y < canvas.height; y += 30) {
-    ctx.strokeStyle = `rgba(60,120,200,${0.1 + (y / canvas.height) * 0.15})`
-    ctx.lineWidth = 1.5
-    ctx.beginPath()
-    for (let x = 0; x < canvas.width; x += 10) {
-      const wy = y + Math.sin((x * 0.02) + frameCount * 0.02 + y * 0.01) * 8
-      if (x === 0) ctx.moveTo(x, wy); else ctx.lineTo(x, wy)
-    }
-    ctx.stroke()
-  }
-
-  // Draw a boat
-  drawBoat(canvas.width / 2, canvas.height * 0.55)
+  for (const ast of menuAsteroids) drawAsteroid(ast)
 
   ctx.textAlign = 'center'
 
-  // Title
-  const titleSize = isPortrait ? 38 : 56
-  ctx.fillStyle = '#ff7744'; ctx.font = `bold ${titleSize}px monospace`
-  ctx.fillText('🍣 SUSHI BROS 🎣', canvas.width / 2, canvas.height * 0.28)
-
-  // Subtitle
-  ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = `${isPortrait ? 14 : 18}px monospace`
-  ctx.fillText('A Top-Down Fishing Adventure', canvas.width / 2, canvas.height * 0.35)
+  const titleSize = isPortrait ? 42 : 64
+  ctx.fillStyle = '#ffffff'; ctx.font = `bold ${titleSize}px monospace`
+  ctx.fillText('SUSHI BROS', canvas.width / 2, canvas.height * 0.35)
 
   if (Math.floor(Date.now() / 500) % 2 === 0) {
     ctx.fillStyle = '#cccccc'; ctx.font = `${isPortrait ? 18 : 22}px monospace`
-    ctx.fillText(isTouchDevice ? 'TAP TO START' : 'PRESS ENTER OR SPACE', canvas.width / 2, canvas.height * 0.44)
+    const startText = isTouchDevice ? 'TAP TO START' : 'PRESS ENTER OR SPACE TO START'
+    ctx.fillText(startText, canvas.width / 2, canvas.height * 0.50)
   }
 
   ctx.fillStyle = 'rgba(255,255,255,0.4)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
   if (isTouchDevice) {
-    ctx.fillText('D-PAD: MOVE    SUSHI: THROW    POLE: SWING', canvas.width / 2, canvas.height * 0.65)
+    ctx.fillText('D-PAD: MOVE    FIRE: SHOOT', canvas.width / 2, canvas.height * 0.60)
   } else {
-    ctx.fillText('WASD/ARROWS — MOVE    SPACE — SUSHI    SHIFT/Z — POLE', canvas.width / 2, canvas.height * 0.65)
+    ctx.fillText('ARROWS/WASD — MOVE    SPACE — FIRE', canvas.width / 2, canvas.height * 0.60)
   }
 
   if (highScore > 0) {
-    ctx.fillStyle = 'rgba(255,200,100,0.6)'; ctx.font = `${isPortrait ? 14 : 16}px monospace`
-    ctx.fillText(`HIGH SCORE: ${highScore}`, canvas.width / 2, canvas.height * 0.72)
+    ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = `${isPortrait ? 14 : 16}px monospace`
+    ctx.fillText(`HIGH SCORE: ${highScore}`, canvas.width / 2, canvas.height * 0.68)
   }
 
   // Control mode toggle
@@ -1240,59 +1005,88 @@ function drawMenu() {
   ctx.font = `${ctrlFont}px monospace`
   const modeLabel = controlMode === 'direction' ? '► DIRECTION MODE' : '► SPIN & THROTTLE'
   const toggleText = isTouchDevice ? `[ ${modeLabel} ]  TAP TO CHANGE` : `[ ${modeLabel} ]  TAB TO CHANGE`
-  const toggleY = canvas.height * 0.80
+  const toggleY = canvas.height * 0.76
   const tw = ctx.measureText(toggleText).width
   ctrlToggleBounds = { x: canvas.width / 2 - tw / 2 - 10, y: toggleY - ctrlFont - 2, w: tw + 20, h: ctrlFont + 12 }
+
+  // Highlight box
   ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 1
   ctx.strokeRect(ctrlToggleBounds.x, ctrlToggleBounds.y, ctrlToggleBounds.w, ctrlToggleBounds.h)
+
   ctx.fillStyle = 'rgba(255,255,255,0.6)'
   ctx.fillText(toggleText, canvas.width / 2, toggleY)
 }
 
-// ─── Game Over ───
+// ─── Game Over Menu ───
 let gameOverBtnPlay = { x: 0, y: 0, w: 0, h: 0 }
 let gameOverBtnMenu = { x: 0, y: 0, w: 0, h: 0 }
 
 function handleGameOverClick(cx: number, cy: number) {
   if (cx >= gameOverBtnPlay.x && cx <= gameOverBtnPlay.x + gameOverBtnPlay.w &&
-      cy >= gameOverBtnPlay.y && cy <= gameOverBtnPlay.y + gameOverBtnPlay.h) startGame()
-  else if (cx >= gameOverBtnMenu.x && cx <= gameOverBtnMenu.x + gameOverBtnMenu.w &&
-           cy >= gameOverBtnMenu.y && cy <= gameOverBtnMenu.y + gameOverBtnMenu.h) state = 'menu'
+      cy >= gameOverBtnPlay.y && cy <= gameOverBtnPlay.y + gameOverBtnPlay.h) {
+    startGame()
+  } else if (cx >= gameOverBtnMenu.x && cx <= gameOverBtnMenu.x + gameOverBtnMenu.w &&
+             cy >= gameOverBtnMenu.y && cy <= gameOverBtnMenu.y + gameOverBtnMenu.h) {
+    state = 'menu'
+  }
 }
 
+// Mouse click handler for game over buttons
+canvas.addEventListener('click', e => {
+  if (state === 'gameover') {
+    handleGameOverClick(e.clientX, e.clientY)
+  }
+})
+
 function drawGameOver() {
-  ctx.fillStyle = 'rgba(0,0,0,0.7)'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  const halfH = canvas.height / 2
+
+  // Darken top half
+  ctx.fillStyle = 'rgba(0,0,0,0.75)'
+  ctx.fillRect(0, 0, canvas.width, halfH)
+
+  // Divider line
+  ctx.strokeStyle = 'rgba(255,255,255,0.2)'; ctx.lineWidth = 1
+  ctx.beginPath(); ctx.moveTo(0, halfH); ctx.lineTo(canvas.width, halfH); ctx.stroke()
 
   ctx.textAlign = 'center'
   const cx = canvas.width / 2
+
+  // Title
   const titleSize = isPortrait ? 36 : 48
-
+  const titleY = halfH * 0.28
   ctx.fillStyle = '#ff4444'; ctx.font = `bold ${titleSize}px monospace`
-  ctx.fillText('GAME OVER', cx, canvas.height * 0.25)
+  ctx.fillText('GAME OVER', cx, titleY)
 
+  // Score
+  const scoreY = titleY + (isPortrait ? 40 : 50)
   ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 20 : 24}px monospace`
-  ctx.fillText(`SCORE: ${score}`, cx, canvas.height * 0.35)
-  ctx.fillText(`DISTANCE: ${distance}m`, cx, canvas.height * 0.42)
+  ctx.fillText(`SCORE: ${score}`, cx, scoreY)
 
-  let nextY = canvas.height * 0.48
+  // High score
+  let nextY = scoreY + (isPortrait ? 30 : 35)
   if (score >= highScore && score > 0) {
     ctx.fillStyle = '#ffdd00'; ctx.font = `${isPortrait ? 16 : 20}px monospace`
-    ctx.fillText('🏆 NEW HIGH SCORE!', cx, nextY)
-    nextY += 35
+    ctx.fillText('NEW HIGH SCORE!', cx, nextY)
+    nextY += (isPortrait ? 30 : 35)
   }
 
-  const btnW = isPortrait ? 200 : 240, btnH = isPortrait ? 44 : 50, btnGap = 14
+  // Buttons
+  const btnW = isPortrait ? 200 : 240
+  const btnH = isPortrait ? 44 : 50
+  const btnGap = 14
   const btnStartY = nextY + 10
 
+  // Play Again button
   gameOverBtnPlay = { x: cx - btnW / 2, y: btnStartY, w: btnW, h: btnH }
-  ctx.fillStyle = 'rgba(255,120,68,0.2)'
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'
   ctx.fillRect(gameOverBtnPlay.x, gameOverBtnPlay.y, btnW, btnH)
-  ctx.strokeStyle = 'rgba(255,120,68,0.8)'; ctx.lineWidth = 2
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 2
   ctx.strokeRect(gameOverBtnPlay.x, gameOverBtnPlay.y, btnW, btnH)
   ctx.fillStyle = '#ffffff'; ctx.font = `bold ${isPortrait ? 16 : 18}px monospace`
   ctx.fillText('PLAY AGAIN', cx, btnStartY + btnH / 2 + 6)
 
+  // Main Menu button
   const menuBtnY = btnStartY + btnH + btnGap
   gameOverBtnMenu = { x: cx - btnW / 2, y: menuBtnY, w: btnW, h: btnH }
   ctx.fillStyle = 'rgba(255,255,255,0.06)'
@@ -1302,24 +1096,20 @@ function drawGameOver() {
   ctx.fillStyle = 'rgba(255,255,255,0.7)'; ctx.font = `${isPortrait ? 14 : 16}px monospace`
   ctx.fillText('MAIN MENU', cx, menuBtnY + btnH / 2 + 5)
 
+  // Keyboard hint
+  ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
   if (!isTouchDevice) {
-    ctx.fillStyle = 'rgba(255,255,255,0.3)'; ctx.font = `${isPortrait ? 10 : 12}px monospace`
     ctx.fillText('ENTER — PLAY AGAIN    ESC — MAIN MENU', cx, menuBtnY + btnH + 25)
   }
 }
 
 function draw() {
-  if (state === 'menu') {
-    drawMenu()
-  } else if (state === 'playing') {
-    drawScrollingBackground()
-    for (const en of enemies) drawEnemy(en)
-    drawPlayer()
-    drawSushis()
-    drawEnemyProjectiles()
-    drawParticles()
-    drawHUD()
-    drawTouchControls()
+  drawBackground()
+
+  if (state === 'menu') { drawMenu() }
+  else if (state === 'playing') {
+    for (const ast of asteroids) drawAsteroid(ast)
+    drawShip(); drawBullets(); drawParticles(); drawHUD(); drawTouchControls()
     if (paused) {
       ctx.fillStyle = 'rgba(0,0,0,0.5)'
       ctx.fillRect(0, 0, canvas.width, canvas.height)
@@ -1327,12 +1117,12 @@ function draw() {
       ctx.textAlign = 'center'
       ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2)
       ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = `${isPortrait ? 14 : 18}px monospace`
-      ctx.fillText(isTouchDevice ? 'TAP ▶ TO RESUME' : 'PRESS P OR ESC', canvas.width / 2, canvas.height / 2 + 40)
+      const resumeText = isTouchDevice ? 'TAP ▶ TO RESUME' : 'PRESS P OR ESC TO RESUME'
+      ctx.fillText(resumeText, canvas.width / 2, canvas.height / 2 + 40)
     }
   } else if (state === 'gameover') {
-    drawScrollingBackground()
-    drawParticles()
-    drawGameOver()
+    for (const ast of asteroids) drawAsteroid(ast)
+    drawParticles(); drawHUD(); drawGameOver()
   }
 }
 
