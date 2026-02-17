@@ -8,14 +8,19 @@ local currentMusicLevel = -1
 
 -- Helper: create a SoundData from a generator function
 local function makeSound(duration, generator)
-    local samples = math.floor(sampleRate * duration)
-    local sd = love.sound.newSoundData(samples, sampleRate, 16, 1)
-    for i = 0, samples - 1 do
-        local t = i / sampleRate
-        local v = generator(t, duration)
-        sd:setSample(i, math.max(-1, math.min(1, v)))
-    end
-    return love.audio.newSource(sd, "static")
+    local ok, result = pcall(function()
+        local samples = math.floor(sampleRate * duration)
+        local sd = love.sound.newSoundData(samples, sampleRate, 16, 1)
+        for i = 0, samples - 1 do
+            local t = i / sampleRate
+            local v = generator(t, duration)
+            sd:setSample(i, math.max(-1, math.min(1, v)))
+        end
+        return love.audio.newSource(sd, "static")
+    end)
+    if ok then return result end
+    -- Return a dummy source-like object if audio fails (e.g., in love.js)
+    return { play = function() end, stop = function() end, setLooping = function() end }
 end
 
 -- Simple oscillators
