@@ -3507,8 +3507,8 @@ function draw() {
   } else if (state === 'unlockModal') {
     // Draw the game frozen in background
     drawScrollingBackground()
+    for (const en of enemies) drawEnemy(en)
     drawParticles()
-    drawEnemies()
     drawPlayer()
     drawHUD()
     // Draw unlock modal overlay
