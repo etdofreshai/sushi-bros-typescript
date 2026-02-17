@@ -788,12 +788,21 @@ canvas.addEventListener('touchstart', e => {
     } else if (hitTest(t.clientX, t.clientY, hp.x, hp.y, POLE_R)) {
       poleTouchId = t.identifier; poleActive = true; activatePole()
     } else if (fireTouchId === null && t.clientX > canvas.width * JOYSTICK_ZONE_X && t.clientY > TOUCH_TOP_LIMIT) {
-      fireTouchId = t.identifier; fireActive = true; fireOpacity = 1
-      firePos_ = { x: t.clientX, y: t.clientY }
-      fireCenter = { x: t.clientX, y: t.clientY }
-      fireThumb = { x: t.clientX, y: t.clientY }
-      fireStickActive = false
-      if (!fireAutoTimer) fireAutoTimer = setInterval(() => { if (fireActive && fireStickActive) throwSushi() }, 220)
+      // Context-based weapon: water = pole, land = sushi
+      const playerWorldYForWeapon = scrollY + (canvas.height - player.pos.y)
+      const weaponTerrain = getTerrainAt(playerWorldYForWeapon)
+      if (weaponTerrain === 'water') {
+        // On water: default to fishing pole
+        poleTouchId = t.identifier; poleActive = true; activatePole()
+      } else {
+        // On land: default to sushi
+        fireTouchId = t.identifier; fireActive = true; fireOpacity = 1
+        firePos_ = { x: t.clientX, y: t.clientY }
+        fireCenter = { x: t.clientX, y: t.clientY }
+        fireThumb = { x: t.clientX, y: t.clientY }
+        fireStickActive = false
+        if (!fireAutoTimer) fireAutoTimer = setInterval(() => { if (fireActive && fireStickActive) throwSushi() }, 220)
+      }
     }
   }
 }, { passive: false })
@@ -992,17 +1001,25 @@ function spawnEnemiesAhead() {
     // Spawn 1-3 enemies per "row"
     const count = 1 + Math.floor(Math.random() * 2)
     for (let c = 0; c < count; c++) {
-      const types: EnemyType[] = ['crab', 'seagull', 'fisherman']
+      const terrainAtSpawn = getTerrainAt(nextEnemyWorldY)
+      const isWaterSpawn = terrainAtSpawn === 'water'
+      // On water: only crabs and seagulls (no fisherman)
+      const types: EnemyType[] = isWaterSpawn ? ['crab', 'seagull'] : ['crab', 'seagull', 'fisherman']
       const diff = Math.min(nextEnemyWorldY / 5000, 1)
-      const weights = lvlCfg ? [
-        lvlCfg.enemyWeights[0] + (1 - diff) * 0.2,
-        lvlCfg.enemyWeights[1] + diff * 0.2,
-        lvlCfg.enemyWeights[2] + diff * 0.3
-      ] : [
-        1 - diff * 0.3,
-        0.3 + diff * 0.4,
-        diff * 0.5
-      ]
+      let weights: number[]
+      if (isWaterSpawn) {
+        weights = [0.5, 0.5]
+      } else {
+        weights = lvlCfg ? [
+          lvlCfg.enemyWeights[0] + (1 - diff) * 0.2,
+          lvlCfg.enemyWeights[1] + diff * 0.2,
+          lvlCfg.enemyWeights[2] + diff * 0.3
+        ] : [
+          1 - diff * 0.3,
+          0.3 + diff * 0.4,
+          diff * 0.5
+        ]
+      }
       const total = weights.reduce((a, b) => a + b)
       let r = Math.random() * total, type: EnemyType = 'crab'
       for (let i = 0; i < types.length; i++) {
@@ -1231,8 +1248,13 @@ function update() {
     }
   }
 
-  // Keyboard actions
-  if (keys['Space']) { keys['Space'] = false; throwSushi() }
+  // Keyboard actions - context-based weapon
+  const playerWorldYForKeys = scrollY + (canvas.height - player.pos.y)
+  const keyTerrain = getTerrainAt(playerWorldYForKeys)
+  if (keys['Space']) {
+    keys['Space'] = false
+    if (keyTerrain === 'water') { activatePole() } else { throwSushi() }
+  }
   if (keys['ShiftLeft'] || keys['ShiftRight'] || keys['KeyZ']) {
     keys['ShiftLeft'] = false; keys['ShiftRight'] = false; keys['KeyZ'] = false
     activatePole()
@@ -1525,13 +1547,14 @@ function updateEnemies() {
 
     // Lateral movement (slow, based on moveFactor)
     if (en.moveFactor > 0.05) {
-      // Crabs: gentle side-to-side
+      // Crabs: fast aggressive side-to-side
       if (en.type === 'crab') {
-        en.pos.x = en.baseX + Math.sin(en.timer * 0.015 * en.moveFactor) * 30 * en.moveFactor
+        en.pos.x = en.baseX + Math.sin(en.timer * 0.08) * 120
       }
-      // Seagulls: gentle sine drift
+      // Seagulls: diagonal drift (move laterally over time)
       else if (en.type === 'seagull') {
-        en.pos.x = en.baseX + Math.sin(en.timer * 0.02 * en.moveFactor) * 40 * en.moveFactor
+        const dir = ((en.baseX > canvas.width / 2) ? -1 : 1)
+        en.pos.x = en.baseX + dir * en.timer * 0.8
       }
       // Fisherman: very subtle sway
       else if (en.type === 'fisherman') {
