@@ -414,6 +414,11 @@ function playVictoryJingle() {
 // ─── Water Splash Tracking ───
 let playerWasOnWater = false
 
+// ─── Player Animation State ───
+let playerIsMoving = false
+let playerWalkTimer = 0
+let playerShootAnim = 0 // frames remaining for shoot/cast flash
+
 // ─── Types ───
 interface Vec2 { x: number; y: number }
 
@@ -610,58 +615,33 @@ function saveHighScore(s: number, lvl: number) {
 // ─── State ───
 type GameState = 'menu' | 'playing' | 'gameover' | 'levelIntro' | 'levelComplete' | 'victory' | 'highscores' | 'controls' | 'dialogue'
 
-// ─── Dialogue System ───
-interface DialogueLine {
-  speaker: string
-  text: string
-  speakerColor?: string
-}
-interface DialogueScene {
-  lines: DialogueLine[]
-  onComplete: () => void
-}
+// ─── Dialogue/Cutscene System ───
+interface DialogueLine { speaker: string; text: string; speakerColor?: string }
+interface DialogueScene { lines: DialogueLine[]; onComplete: () => void }
 let currentDialogue: DialogueScene | null = null
 let dialogueIndex = 0
 let dialogueCharIndex = 0
 let dialogueCharTimer = 0
-const DIALOGUE_CHAR_SPEED = 2 // frames per character
+const DIALOGUE_CHAR_SPEED = 2
 let dialogueFullyRevealed = false
 
 function startDialogue(scene: DialogueScene) {
-  currentDialogue = scene
-  dialogueIndex = 0
-  dialogueCharIndex = 0
-  dialogueCharTimer = 0
-  dialogueFullyRevealed = false
-  state = 'dialogue'
+  currentDialogue = scene; dialogueIndex = 0; dialogueCharIndex = 0
+  dialogueCharTimer = 0; dialogueFullyRevealed = false; state = 'dialogue'
 }
-
 function advanceDialogue() {
   if (!currentDialogue) return
-  if (!dialogueFullyRevealed) {
-    // Reveal full line instantly
-    dialogueFullyRevealed = true
-    dialogueCharIndex = currentDialogue.lines[dialogueIndex].text.length
-    return
-  }
+  if (!dialogueFullyRevealed) { dialogueFullyRevealed = true; dialogueCharIndex = currentDialogue.lines[dialogueIndex].text.length; return }
   dialogueIndex++
-  if (dialogueIndex >= currentDialogue.lines.length) {
-    const cb = currentDialogue.onComplete
-    currentDialogue = null
-    cb()
-  } else {
-    dialogueCharIndex = 0
-    dialogueCharTimer = 0
-    dialogueFullyRevealed = false
-  }
+  if (dialogueIndex >= currentDialogue.lines.length) { const cb = currentDialogue.onComplete; currentDialogue = null; cb() }
+  else { dialogueCharIndex = 0; dialogueCharTimer = 0; dialogueFullyRevealed = false }
 }
-
-function getDialogueScene(sceneId: string, onComplete: () => void): DialogueScene {
-  const scenes: Record<string, DialogueLine[]> = {
+function getDialogueScene(id: string, onComplete: () => void): DialogueScene {
+  const S: Record<string, DialogueLine[]> = {
     intro: [
       { speaker: '', text: 'In a world where sushi is life, legends speak of the rarest ingredients hidden on a mysterious island far across the sea...' },
       { speaker: 'Chef Toro', text: "I've spent my whole career perfecting the craft. But the ULTIMATE sushi? It requires ingredients no chef has ever tasted!", speakerColor: '#ff6b6b' },
-      { speaker: '', text: 'The Sushi Brothers — legendary chefs of unmatched skill — have finally pinpointed the island\'s location.' },
+      { speaker: '', text: "The Sushi Brothers — legendary chefs of unmatched skill — have finally pinpointed the island's location." },
       { speaker: 'Chef Toro', text: "There's just one tiny problem... the ocean is CRAWLING with hostile crabs, angry seagulls, and rival fishermen who want those ingredients for themselves.", speakerColor: '#ff6b6b' },
       { speaker: 'Chef Toro', text: "Ha! As if that would stop me. Knife in hand, rice in heart — TIME TO SET SAIL! 🍣", speakerColor: '#ff6b6b' },
     ],
@@ -680,83 +660,40 @@ function getDialogueScene(sceneId: string, onComplete: () => void): DialogueScen
     afterLevel3: [
       { speaker: 'Chef Toro', text: "I... I DID IT! The legendary ingredients are MINE!", speakerColor: '#ff6b6b' },
       { speaker: '', text: 'Chef Toro holds up the shimmering, impossibly fresh ingredients — they glow with an otherworldly light.' },
-      { speaker: 'Chef Toro', text: "Golden uni from the deep caves... starlight wasabi... dragon-scale nori... It\'s all here!", speakerColor: '#ff6b6b' },
-      { speaker: 'Chef Toro', text: "The ultimate sushi is COMPLETE. The Sushi Brothers\' legend will live FOREVER! 🍣✨🎉", speakerColor: '#ff6b6b' },
+      { speaker: 'Chef Toro', text: "Golden uni from the deep caves... starlight wasabi... dragon-scale nori... It's all here!", speakerColor: '#ff6b6b' },
+      { speaker: 'Chef Toro', text: "The ultimate sushi is COMPLETE. The Sushi Brothers' legend will live FOREVER! 🍣✨🎉", speakerColor: '#ff6b6b' },
     ],
   }
-  return { lines: scenes[sceneId] || [], onComplete }
+  return { lines: S[id] || [], onComplete }
 }
-
 function drawDialogue() {
   if (!currentDialogue) return
   const line = currentDialogue.lines[dialogueIndex]
-  
-  // Dark overlay
-  ctx.fillStyle = 'rgba(0, 0, 20, 0.85)'
-  ctx.fillRect(0, 0, canvas.width, canvas.height)
-  
-  const cx = canvas.width / 2
-  const fontSize = isPortrait ? 16 : 20
-  const speakerFontSize = isPortrait ? 20 : 26
-  const padding = isPortrait ? 30 : 60
-  const maxWidth = canvas.width - padding * 2
-  
-  // Speaker name
-  const speakerY = canvas.height * 0.3
+  ctx.fillStyle = 'rgba(0,0,20,0.85)'; ctx.fillRect(0, 0, canvas.width, canvas.height)
+  const cx = canvas.width / 2, fs = isPortrait ? 16 : 20, sfs = isPortrait ? 20 : 26
+  const pad = isPortrait ? 30 : 60, mw = canvas.width - pad * 2, sy = canvas.height * 0.3
   if (line.speaker) {
-    ctx.font = `bold ${speakerFontSize}px monospace`
-    ctx.textAlign = 'center'
-    ctx.fillStyle = line.speakerColor || '#ffcc00'
-    ctx.fillText(line.speaker, cx, speakerY)
+    ctx.font = `bold ${sfs}px monospace`; ctx.textAlign = 'center'
+    ctx.fillStyle = line.speakerColor || '#ffcc00'; ctx.fillText(line.speaker, cx, sy)
   }
-  
-  // Dialogue text with word wrap and typewriter
-  const visibleText = line.text.substring(0, dialogueCharIndex)
-  ctx.font = `${fontSize}px monospace`
-  ctx.fillStyle = '#ffffff'
-  ctx.textAlign = 'center'
-  
-  // Word wrap
-  const words = visibleText.split(' ')
-  const lines: string[] = []
-  let currentLine = ''
-  for (const word of words) {
-    const test = currentLine ? currentLine + ' ' + word : word
-    if (ctx.measureText(test).width > maxWidth && currentLine) {
-      lines.push(currentLine)
-      currentLine = word
-    } else {
-      currentLine = test
-    }
-  }
-  if (currentLine) lines.push(currentLine)
-  
-  const lineHeight = fontSize * 1.5
-  const textStartY = speakerY + 40
-  for (let i = 0; i < lines.length; i++) {
-    ctx.fillText(lines[i], cx, textStartY + i * lineHeight)
-  }
-  
-  // Blinking prompt at bottom
+  const vt = line.text.substring(0, dialogueCharIndex)
+  ctx.font = `${fs}px monospace`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'
+  const words = vt.split(' '); const wlines: string[] = []; let cl = ''
+  for (const w of words) { const t = cl ? cl + ' ' + w : w; if (ctx.measureText(t).width > mw && cl) { wlines.push(cl); cl = w } else cl = t }
+  if (cl) wlines.push(cl)
+  const lh = fs * 1.5, tsy = sy + 40
+  for (let i = 0; i < wlines.length; i++) ctx.fillText(wlines[i], cx, tsy + i * lh)
   if (dialogueFullyRevealed && Math.floor(frameCount / 30) % 2 === 0) {
-    ctx.font = `${isPortrait ? 12 : 16}px monospace`
-    ctx.fillStyle = 'rgba(255,255,255,0.7)'
+    ctx.font = `${isPortrait ? 12 : 16}px monospace`; ctx.fillStyle = 'rgba(255,255,255,0.7)'
     ctx.fillText(isTouchDevice ? '▼ Tap to continue' : '▼ Press Enter', cx, canvas.height * 0.8)
   }
-  
-  // Progress dots
-  ctx.fillStyle = 'rgba(255,255,255,0.3)'
-  const dotY = canvas.height * 0.88
-  const totalDots = currentDialogue.lines.length
-  const dotSpacing = 12
-  const dotsStartX = cx - ((totalDots - 1) * dotSpacing) / 2
-  for (let i = 0; i < totalDots; i++) {
-    ctx.beginPath()
-    ctx.arc(dotsStartX + i * dotSpacing, dotY, i === dialogueIndex ? 4 : 2.5, 0, Math.PI * 2)
-    ctx.fillStyle = i === dialogueIndex ? '#ffffff' : 'rgba(255,255,255,0.3)'
-    ctx.fill()
+  const dotY = canvas.height * 0.88, td = currentDialogue.lines.length, ds = 12, dsx = cx - ((td - 1) * ds) / 2
+  for (let i = 0; i < td; i++) {
+    ctx.beginPath(); ctx.arc(dsx + i * ds, dotY, i === dialogueIndex ? 4 : 2.5, 0, Math.PI * 2)
+    ctx.fillStyle = i === dialogueIndex ? '#fff' : 'rgba(255,255,255,0.3)'; ctx.fill()
   }
 }
+
 let state: GameState = 'menu'
 let score = 0
 let highScore = parseInt(localStorage.getItem('sushi-bros-hi') || '0')
@@ -938,12 +875,21 @@ canvas.addEventListener('touchstart', e => {
     } else if (hitTest(t.clientX, t.clientY, hp.x, hp.y, POLE_R)) {
       poleTouchId = t.identifier; poleActive = true; activatePole()
     } else if (fireTouchId === null && t.clientX > canvas.width * JOYSTICK_ZONE_X && t.clientY > TOUCH_TOP_LIMIT) {
-      fireTouchId = t.identifier; fireActive = true; fireOpacity = 1
-      firePos_ = { x: t.clientX, y: t.clientY }
-      fireCenter = { x: t.clientX, y: t.clientY }
-      fireThumb = { x: t.clientX, y: t.clientY }
-      fireStickActive = false
-      if (!fireAutoTimer) fireAutoTimer = setInterval(() => { if (fireActive && fireStickActive) throwSushi() }, 220)
+      // Context-based weapon: water = pole, land = sushi
+      const playerWorldYForWeapon = scrollY + (canvas.height - player.pos.y)
+      const weaponTerrain = getTerrainAt(playerWorldYForWeapon)
+      if (weaponTerrain === 'water') {
+        // On water: default to fishing pole
+        poleTouchId = t.identifier; poleActive = true; activatePole()
+      } else {
+        // On land: default to sushi
+        fireTouchId = t.identifier; fireActive = true; fireOpacity = 1
+        firePos_ = { x: t.clientX, y: t.clientY }
+        fireCenter = { x: t.clientX, y: t.clientY }
+        fireThumb = { x: t.clientX, y: t.clientY }
+        fireStickActive = false
+        if (!fireAutoTimer) fireAutoTimer = setInterval(() => { if (fireActive && fireStickActive) throwSushi() }, 220)
+      }
     }
   }
 }, { passive: false })
@@ -1023,6 +969,7 @@ function throwSushi() {
   if (state !== 'playing' || !player.visible || sushis.length >= 10) return
   if (audioCtx.state === 'suspended') audioCtx.resume()
   sfxSushiThrow()
+  playerShootAnim = 14 // trigger throw flash animation
   const speed = 7
   const angle = (isTouchDevice && fireActive) ? shootAngle : player.facing
   const angles = activeTriple > 0 ? [angle - 0.2, angle, angle + 0.2] : [angle]
@@ -1043,6 +990,7 @@ function activatePole() {
   if (state !== 'playing' || !player.visible || poleSwing) return
   if (audioCtx.state === 'suspended') audioCtx.resume()
   sfxPoleSwing()
+  playerShootAnim = 14 // trigger cast flash animation
   poleSwing = {
     angle: player.facing - Math.PI * 0.6,
     timer: 20,
@@ -1145,19 +1093,26 @@ function spawnEnemiesAhead() {
     // Spawn 1-3 enemies per "row"
     const count = 1 + Math.floor(Math.random() * 2)
     for (let c = 0; c < count; c++) {
-      const types: EnemyType[] = ['crab', 'seagull', 'fisherman']
+      const terrainAtSpawn = getTerrainAt(nextEnemyWorldY)
+      const isWaterSpawn = terrainAtSpawn === 'water'
+      // On water or level 1: only crabs and seagulls (no fisherman)
+      const noFisherman = isWaterSpawn || currentLevel === 0
+      const types: EnemyType[] = noFisherman ? ['crab', 'seagull'] : ['crab', 'seagull', 'fisherman']
       const diff = Math.min(nextEnemyWorldY / 5000, 1)
-      const weights = lvlCfg ? [
-        lvlCfg.enemyWeights[0] + (1 - diff) * 0.2,
-        lvlCfg.enemyWeights[1] + diff * 0.2,
-        lvlCfg.enemyWeights[2] + diff * 0.3
-      ] : [
-        1 - diff * 0.3,
-        0.3 + diff * 0.4,
-        diff * 0.5
-      ]
-      // No fishermen on level 1 (index 0)
-      if (currentLevel === 0) weights[2] = 0
+      let weights: number[]
+      if (noFisherman) {
+        weights = [0.5, 0.5]
+      } else {
+        weights = lvlCfg ? [
+          lvlCfg.enemyWeights[0] + (1 - diff) * 0.2,
+          lvlCfg.enemyWeights[1] + diff * 0.2,
+          lvlCfg.enemyWeights[2] + diff * 0.3
+        ] : [
+          1 - diff * 0.3,
+          0.3 + diff * 0.4,
+          diff * 0.5
+        ]
+      }
       const total = weights.reduce((a, b) => a + b)
       let r = Math.random() * total, type: EnemyType = 'crab'
       for (let i = 0; i < types.length; i++) {
@@ -1235,12 +1190,8 @@ function update() {
   if (state === 'dialogue') {
     if (currentDialogue && !dialogueFullyRevealed) {
       dialogueCharTimer++
-      if (dialogueCharTimer >= DIALOGUE_CHAR_SPEED) {
-        dialogueCharTimer = 0
-        dialogueCharIndex++
-        if (dialogueCharIndex >= currentDialogue.lines[dialogueIndex].text.length) {
-          dialogueFullyRevealed = true
-        }
+      if (dialogueCharTimer >= DIALOGUE_CHAR_SPEED) { dialogueCharTimer = 0; dialogueCharIndex++
+        if (dialogueCharIndex >= currentDialogue.lines[dialogueIndex].text.length) dialogueFullyRevealed = true
       }
     }
     return
@@ -1292,20 +1243,10 @@ function update() {
     moveY = Math.sin(dpadAngle)
   }
 
-  // On water (boat): only forward/backward (up/down), no left/right
-  if (onWater) {
-    moveX = 0
-  }
-
   const moveLen = Math.hypot(moveX, moveY)
   if (moveLen > 0) {
     moveX /= moveLen; moveY /= moveLen
-    if (onWater) {
-      // On boat, always face up
-      player.facing = -Math.PI / 2
-    } else {
-      player.facing = Math.atan2(moveY, moveX)
-    }
+    player.facing = Math.atan2(moveY, moveX)
   }
 
   const baseSpeed = onWater ? 2.5 : 3.5
@@ -1316,6 +1257,11 @@ function update() {
   // Keep player on screen
   player.pos.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.pos.x))
   player.pos.y = Math.max(player.radius + 20, Math.min(canvas.height - player.radius - 20, player.pos.y))
+
+  // Track player animation state
+  playerIsMoving = moveLen > 0
+  if (playerIsMoving) playerWalkTimer++
+  if (playerShootAnim > 0) playerShootAnim--
 
   // Camera: player is clamped to the bottom 40% of the screen.
   // When they'd move higher than 60% from the top, the camera scrolls instead.
@@ -1399,8 +1345,13 @@ function update() {
     }
   }
 
-  // Keyboard actions
-  if (keys['Space']) { keys['Space'] = false; throwSushi() }
+  // Keyboard actions - context-based weapon
+  const playerWorldYForKeys = scrollY + (canvas.height - player.pos.y)
+  const keyTerrain = getTerrainAt(playerWorldYForKeys)
+  if (keys['Space']) {
+    keys['Space'] = false
+    if (keyTerrain === 'water') { activatePole() } else { throwSushi() }
+  }
   if (keys['ShiftLeft'] || keys['ShiftRight'] || keys['KeyZ']) {
     keys['ShiftLeft'] = false; keys['ShiftRight'] = false; keys['KeyZ'] = false
     activatePole()
@@ -1693,13 +1644,14 @@ function updateEnemies() {
 
     // Lateral movement (slow, based on moveFactor)
     if (en.moveFactor > 0.05) {
-      // Crabs: gentle side-to-side
+      // Crabs: fast aggressive side-to-side
       if (en.type === 'crab') {
-        en.pos.x = en.baseX + Math.sin(en.timer * 0.015 * en.moveFactor) * 30 * en.moveFactor
+        en.pos.x = en.baseX + Math.sin(en.timer * 0.08) * 120
       }
-      // Seagulls: gentle sine drift
+      // Seagulls: diagonal drift (move laterally over time)
       else if (en.type === 'seagull') {
-        en.pos.x = en.baseX + Math.sin(en.timer * 0.02 * en.moveFactor) * 40 * en.moveFactor
+        const dir = ((en.baseX > canvas.width / 2) ? -1 : 1)
+        en.pos.x = en.baseX + dir * en.timer * 0.8
       }
       // Fisherman: very subtle sway
       else if (en.type === 'fisherman') {
@@ -2511,7 +2463,12 @@ function drawLevelDecorations() {
 
 function drawBoat(x: number, y: number) {
   ctx.save()
-  ctx.translate(x, y)
+  // Each scenery boat gets its own bob/tilt phase based on x position
+  const bobPhase = x * 0.07
+  const bob = Math.sin(frameCount * 0.05 + bobPhase) * 5
+  const tilt = Math.sin(frameCount * 0.03 + bobPhase + 1.0) * 0.07
+  ctx.translate(x, y + bob)
+  ctx.rotate(tilt)
   // Hull
   ctx.fillStyle = '#8B4513'
   ctx.beginPath()
@@ -2550,8 +2507,10 @@ function drawPlayer() {
     // Boat deck
     ctx.fillStyle = '#A0522D'
     ctx.fillRect(-14, 6, 28, 4)
-    // Gentle bob
-    const bob = Math.sin(frameCount * 0.04) * 1.5
+    // Bobbing animation — more pronounced than before
+    const bob = Math.sin(frameCount * 0.05) * 5
+    const tilt = Math.sin(frameCount * 0.03 + 1.0) * 0.06
+    ctx.rotate(tilt)
     ctx.translate(0, bob)
     // Wake lines behind boat
     ctx.strokeStyle = 'rgba(255,255,255,0.15)'
@@ -2565,9 +2524,47 @@ function drawPlayer() {
 
   ctx.save()
   ctx.translate(px, py)
-  // Bob on water
+  // Bob on water (synced with boat)
   if (isOnWater) {
-    ctx.translate(0, Math.sin(frameCount * 0.04) * 1.5 - 4)
+    ctx.translate(0, Math.sin(frameCount * 0.05) * 5 - 4)
+  }
+
+  // Walking animation: body wobble + foot alternation on land
+  if (playerIsMoving && !isOnWater) {
+    const walkPhase = playerWalkTimer * 0.3
+    const wobbleX = Math.sin(walkPhase) * 1.5
+    const wobbleY = Math.abs(Math.sin(walkPhase)) * -1.5
+    ctx.translate(wobbleX, wobbleY)
+  }
+
+  // Shoot/cast flash effect: expanding ring + directional burst
+  if (playerShootAnim > 0) {
+    const t = playerShootAnim / 14
+    const expand = (14 - playerShootAnim) * 2.5
+    // Expanding ring
+    ctx.strokeStyle = `rgba(255, 255, 100, ${t * 0.85})`
+    ctx.lineWidth = 3 * t
+    ctx.beginPath()
+    ctx.arc(0, 0, 14 + expand, 0, Math.PI * 2)
+    ctx.stroke()
+    // Directional burst line
+    const burstEnd = 16 + expand + 10
+    ctx.strokeStyle = `rgba(255, 200, 50, ${t})`
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(Math.cos(player.facing) * 13, Math.sin(player.facing) * 13)
+    ctx.lineTo(Math.cos(player.facing) * burstEnd, Math.sin(player.facing) * burstEnd)
+    ctx.stroke()
+  }
+
+  // Legs/feet — drawn before body so body circle covers the tops naturally
+  if (!isOnWater) {
+    const legPhase = playerWalkTimer * 0.25
+    const leftY  = playerIsMoving ? Math.sin(legPhase)           * 4 : 0
+    const rightY = playerIsMoving ? Math.sin(legPhase + Math.PI) * 4 : 0
+    ctx.fillStyle = '#888899'
+    ctx.beginPath(); ctx.ellipse(-5, 14 + leftY,  4, 3.5, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.ellipse( 5, 14 + rightY, 4, 3.5, 0, 0, Math.PI * 2); ctx.fill()
   }
 
   // Body (white chef outfit)
@@ -2694,6 +2691,28 @@ function drawEnemy(en: Enemy) {
     ctx.fillStyle = '#000000'
     ctx.beginPath(); ctx.arc(0, -2, 1.5, 0, Math.PI * 2); ctx.fill()
   } else if (en.type === 'fisherman') {
+    // ── Charge-up glow: builds for the last 60 frames before shooting ──
+    const CHARGE_THRESHOLD = 60
+    if (en.shootTimer > 0 && en.shootTimer <= CHARGE_THRESHOLD) {
+      const chargeT = 1 - en.shootTimer / CHARGE_THRESHOLD // 0→1 as countdown nears 0
+      const glowR = en.radius + 4 + chargeT * 14
+      const gColor = Math.floor(165 * (1 - chargeT)) // orange→red as charge builds
+      // Inner fill glow
+      ctx.fillStyle = `rgba(255, ${gColor}, 0, ${0.15 + chargeT * 0.45})`
+      ctx.beginPath(); ctx.arc(0, 0, glowR, 0, Math.PI * 2); ctx.fill()
+      // Pulsing outer ring — pulses faster as charge nears full
+      const pulseFreq = 0.08 + chargeT * 0.3
+      const pulseA = 0.5 + 0.5 * Math.sin(frameCount * pulseFreq * Math.PI * 2)
+      ctx.strokeStyle = `rgba(255, ${gColor}, 0, ${(0.35 + chargeT * 0.55) * pulseA})`
+      ctx.lineWidth = 1.5 + chargeT * 2.5
+      ctx.beginPath(); ctx.arc(0, 0, glowR + 4, 0, Math.PI * 2); ctx.stroke()
+      // At very high charge: additional bright flash sparks
+      if (chargeT > 0.75 && Math.floor(frameCount / 3) % 2 === 0) {
+        ctx.fillStyle = `rgba(255, 200, 50, 0.4)`
+        ctx.beginPath(); ctx.arc(0, 0, glowR + 8, 0, Math.PI * 2); ctx.fill()
+      }
+    }
+
     // Body (blue jacket)
     ctx.fillStyle = '#3355aa'
     ctx.beginPath()
@@ -2712,7 +2731,7 @@ function drawEnemy(en: Enemy) {
     ctx.fillStyle = '#000000'
     ctx.fillRect(-5, -8, 3, 2)
     ctx.fillRect(2, -8, 3, 2)
-    // Fishing rod
+    // Fishing rod — tip glows red when fully charged
     ctx.strokeStyle = '#8B6914'; ctx.lineWidth = 2
     ctx.beginPath()
     ctx.moveTo(10, 0); ctx.lineTo(18, -15)
@@ -2721,6 +2740,12 @@ function drawEnemy(en: Enemy) {
     ctx.beginPath()
     ctx.moveTo(18, -15); ctx.lineTo(20, -10)
     ctx.stroke()
+    // Rod tip glow when charge is building
+    if (en.shootTimer > 0 && en.shootTimer <= CHARGE_THRESHOLD) {
+      const chargeT = 1 - en.shootTimer / CHARGE_THRESHOLD
+      ctx.fillStyle = `rgba(255, ${Math.floor(165 * (1 - chargeT))}, 0, ${0.5 + chargeT * 0.5})`
+      ctx.beginPath(); ctx.arc(20, -10, 3 + chargeT * 3, 0, Math.PI * 2); ctx.fill()
+    }
   }
 
   ctx.restore()
