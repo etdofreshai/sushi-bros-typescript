@@ -613,7 +613,7 @@ function saveHighScore(s: number, lvl: number) {
 }
 
 // ─── State ───
-type GameState = 'menu' | 'playing' | 'gameover' | 'levelIntro' | 'levelComplete' | 'victory' | 'highscores' | 'controls' | 'dialogue'
+type GameState = 'menu' | 'playing' | 'gameover' | 'levelIntro' | 'levelComplete' | 'victory' | 'highscores' | 'controls' | 'dialogue' | 'unlockModal'
 
 // ─── Dialogue/Cutscene System ───
 interface DialogueLine { speaker: string; text: string; speakerColor?: string }
@@ -666,6 +666,79 @@ function getDialogueScene(id: string, onComplete: () => void): DialogueScene {
   }
   return { lines: S[id] || [], onComplete }
 }
+function drawUnlockModal() {
+  unlockModalTimer++
+  const cx = canvas.width / 2
+  const cy = canvas.height / 2
+
+  // Darken background
+  const fadeIn = Math.min(unlockModalTimer / 20, 1)
+  ctx.fillStyle = `rgba(0, 0, 0, ${0.65 * fadeIn})`
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+
+  if (unlockModalTimer < 10) return // brief delay before showing
+
+  const scale = Math.min((unlockModalTimer - 10) / 15, 1)
+  const eased = 1 - Math.pow(1 - scale, 3) // ease out cubic
+  ctx.save()
+  ctx.translate(cx, cy)
+  ctx.scale(eased, eased)
+  ctx.translate(-cx, -cy)
+
+  const isPortrait = canvas.height > canvas.width
+  const mW = Math.min(canvas.width * 0.85, 360)
+  const mH = isPortrait ? 280 : 240
+  const mX = cx - mW / 2
+  const mY = cy - mH / 2
+
+  // Modal background
+  ctx.fillStyle = 'rgba(20, 30, 60, 0.95)'
+  ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 16); ctx.fill()
+
+  // Gold border
+  ctx.strokeStyle = '#ffcc00'
+  ctx.lineWidth = 3
+  ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 16); ctx.stroke()
+
+  // Star burst / glow
+  const glowPulse = 0.7 + 0.3 * Math.sin(unlockModalTimer * 0.08)
+  const grad = ctx.createRadialGradient(cx, mY + 70, 0, cx, mY + 70, 80)
+  grad.addColorStop(0, `rgba(255, 200, 50, ${0.3 * glowPulse})`)
+  grad.addColorStop(1, 'rgba(255, 200, 50, 0)')
+  ctx.fillStyle = grad
+  ctx.fillRect(mX, mY, mW, mH)
+
+  // Big sushi emoji
+  ctx.textAlign = 'center'
+  ctx.font = `${isPortrait ? 48 : 40}px sans-serif`
+  ctx.fillText('🍣', cx, mY + 65)
+
+  // "UNLOCKED!" header
+  ctx.font = `bold ${isPortrait ? 22 : 20}px monospace`
+  ctx.fillStyle = '#ffcc00'
+  ctx.fillText('ABILITY UNLOCKED!', cx, mY + 105)
+
+  // Ability name
+  ctx.font = `bold ${isPortrait ? 28 : 24}px monospace`
+  ctx.fillStyle = '#ffffff'
+  ctx.fillText('Sushi Throwing', cx, mY + 145)
+
+  // Description
+  ctx.font = `${isPortrait ? 13 : 12}px monospace`
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.75)'
+  ctx.fillText('Hurl sushi at enemies on land!', cx, mY + 175)
+  ctx.fillText('Use the AIM button to throw.', cx, mY + 195)
+
+  // Continue prompt (blinking)
+  if (unlockModalTimer > 40 && Math.floor(unlockModalTimer / 30) % 2 === 0) {
+    ctx.font = `${isPortrait ? 14 : 13}px monospace`
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)'
+    ctx.fillText(isTouchDevice ? 'Tap to continue' : 'Press ENTER to continue', cx, mY + mH - 25)
+  }
+
+  ctx.restore()
+}
+
 function drawDialogue() {
   if (!currentDialogue) return
   const line = currentDialogue.lines[dialogueIndex]
@@ -695,6 +768,9 @@ function drawDialogue() {
 }
 
 let state: GameState = 'menu'
+let sushiThrowUnlocked = false
+let sushiUnlockShown = false
+let unlockModalTimer = 0
 let score = 0
 let highScore = parseInt(localStorage.getItem('sushi-bros-hi') || '0')
 let lives = 3
@@ -763,6 +839,7 @@ addEventListener('keydown', e => {
   if (state === 'highscores' || state === 'controls') {
     if (e.code === 'Escape' || e.code === 'Enter') { state = 'menu' }
   }
+  if (state === 'unlockModal' && (e.code === 'Enter' || e.code === 'Space')) { state = 'playing'; return }
   if (state === 'dialogue' && (e.code === 'Enter' || e.code === 'Space')) { advanceDialogue(); return }
   if (state === 'gameover' && e.code === 'Enter') startTransition(() => startNewRun())
   if (state === 'gameover' && e.code === 'Escape') startTransition(() => { state = 'menu'; stopMusic() })
@@ -849,6 +926,7 @@ canvas.addEventListener('touchstart', e => {
     const t0 = e.changedTouches[0]
     handleMenuClick(t0.clientX, t0.clientY); return
   }
+  if (state === 'unlockModal') { state = 'playing'; return }
   if (state === 'dialogue') { advanceDialogue(); return }
   if (state === 'highscores' || state === 'controls') { state = 'menu'; return }
   if (state === 'gameover') {
@@ -1002,6 +1080,7 @@ function handlePauseMenuClick(cx: number, cy: number): boolean {
 }
 
 canvas.addEventListener('click', e => {
+  if (state === 'unlockModal') { state = 'playing'; return }
   if (state === 'menu') handleMenuClick(e.clientX, e.clientY)
   if (state === 'highscores' || state === 'controls') { state = 'menu' }
   if (state === 'playing') {
@@ -1075,6 +1154,7 @@ function handleMenuClick(cx: number, cy: number) {
 function startNewRun() {
   if (audioCtx.state === 'suspended') audioCtx.resume()
   score = 0; lives = 3; currentLevel = 0
+  sushiThrowUnlocked = false; sushiUnlockShown = false
   resetStreak()
   startDialogue(getDialogueScene('intro', () => beginLevel(0)))
 }
@@ -1096,6 +1176,7 @@ function beginLevel(level: number) {
   powerUps = []
   activeSpeed = 0; activeTriple = 0; hasShield = false
   playerWasOnWater = false
+  if (level > 0) { sushiThrowUnlocked = true; sushiUnlockShown = true }
   resetPlayer()
   state = 'levelIntro'
   levelIntroTimer = 120
@@ -1279,6 +1360,13 @@ function update() {
   if (onWater !== playerWasOnWater && player.visible) {
     spawnParticles(player.pos.x, player.pos.y, 12, ['#4488ff', '#66aaff', '#88ccff', '#aaddff'])
     sfxSplash()
+  }
+  // Detect first time touching land in level 1 → unlock sushi throwing
+  if (!onWater && playerWasOnWater && currentLevel === 0 && !sushiUnlockShown && player.visible) {
+    sushiThrowUnlocked = true
+    sushiUnlockShown = true
+    unlockModalTimer = 0
+    state = 'unlockModal'
   }
   playerWasOnWater = onWater
 
@@ -3416,6 +3504,15 @@ function draw() {
         ctx.fillText('NO', noX + btnW / 2, btnY + btnH / 2 + 5)
       }
     }
+  } else if (state === 'unlockModal') {
+    // Draw the game frozen in background
+    drawScrollingBackground()
+    drawParticles()
+    drawEnemies()
+    drawPlayer()
+    drawHUD()
+    // Draw unlock modal overlay
+    drawUnlockModal()
   } else if (state === 'dialogue') {
     drawDialogue()
   } else if (state === 'gameover') {
