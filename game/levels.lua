@@ -10,10 +10,10 @@ Levels.TERRAIN_COLORS = {
 
 -- Simple deterministic hash
 local function hashY(y)
-    local h = math.floor(y * 2654435761) % 0x7FFFFFFF
-    h = ((h // 65536) ~ h) * 0x45d9f3b % 0x7FFFFFFF
-    h = ((h // 65536) ~ h) % 0x7FFFFFFF
-    return h / 0x7FFFFFFF
+    -- Simple hash that works with LuaJIT (no Lua 5.3 operators)
+    local h = math.abs(math.floor(y * 127.1 + 311.7))
+    h = h % 100000
+    return (math.sin(h) * 43758.5453) % 1
 end
 Levels.hashY = hashY
 
