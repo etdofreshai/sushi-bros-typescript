@@ -1141,20 +1141,10 @@ function update() {
     moveY = Math.sin(dpadAngle)
   }
 
-  // On water (boat): only forward/backward (up/down), no left/right
-  if (onWater) {
-    moveX = 0
-  }
-
   const moveLen = Math.hypot(moveX, moveY)
   if (moveLen > 0) {
     moveX /= moveLen; moveY /= moveLen
-    if (onWater) {
-      // On boat, always face up
-      player.facing = -Math.PI / 2
-    } else {
-      player.facing = Math.atan2(moveY, moveX)
-    }
+    player.facing = Math.atan2(moveY, moveX)
   }
 
   const baseSpeed = onWater ? 2.5 : 3.5
