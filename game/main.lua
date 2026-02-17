@@ -808,32 +808,33 @@ function love.update(dt)
     if G.currentBoss and G.bossFightState == "fighting" and not G.currentBoss.defeated then
         for si = #G.sushis, 1, -1 do
             local s = G.sushis[si]
-            if not s then goto continue_sushi_boss end
-            if G.currentBoss.bossType == "crab_king" and G.currentBoss.shieldTimer and G.currentBoss.shieldTimer > 0 then
-                if dist(s.x, s.y, G.currentBoss.x, G.currentBoss.y) < G.currentBoss.radius + 6 then
+            if s then
+                local handled = false
+                if G.currentBoss.bossType == "crab_king" and G.currentBoss.shieldTimer and G.currentBoss.shieldTimer > 0 then
+                    if dist(s.x, s.y, G.currentBoss.x, G.currentBoss.y) < G.currentBoss.radius + 6 then
+                        table.remove(G.sushis, si)
+                        spawnParticles(s.x, s.y, 4, {{0.533,0.533,1},{0.667,0.667,1}})
+                        handled = true
+                    end
+                end
+                if not handled and dist(s.x, s.y, G.currentBoss.x, G.currentBoss.y) < G.currentBoss.radius + 6 then
                     table.remove(G.sushis, si)
-                    spawnParticles(s.x, s.y, 4, {{0.533,0.533,1},{0.667,0.667,1}})
-                    goto continue_sushi_boss
+                    G.currentBoss.hp = G.currentBoss.hp - 1; G.currentBoss.flashTimer = 6
+                    triggerShake(3); addStreakHit()
+                    spawnParticles(G.currentBoss.x, G.currentBoss.y, 6, {{1,1,1},{1,1,0.533}})
+                    Audio.sfxHit()
+                    if G.currentBoss.hp <= 0 and not G.currentBoss.defeated then
+                        G.currentBoss.defeated = true; G.currentBoss.defeatTimer = 90
+                        G.bossFightState = "defeated"; Audio.sfxBossDefeat(); triggerShake(8)
+                        spawnParticles(G.currentBoss.x, G.currentBoss.y, 30, {{1,0.267,0.267},{1,0.667,0},{1,1,0.267},{1,1,1}})
+                    end
+                    if G.currentBoss.hp > 0 and G.currentBoss.hp <= G.currentBoss.maxHp * 0.5 and G.currentBoss.currentPhase == 1 then
+                        G.currentBoss.currentPhase = 2; G.currentBoss.attackTimer = 30
+                        spawnParticles(G.currentBoss.x, G.currentBoss.y, 15, {{1,0,1},{1,0.267,1},{1,0.667,1}})
+                    end
+                    break
                 end
             end
-            if dist(s.x, s.y, G.currentBoss.x, G.currentBoss.y) < G.currentBoss.radius + 6 then
-                table.remove(G.sushis, si)
-                G.currentBoss.hp = G.currentBoss.hp - 1; G.currentBoss.flashTimer = 6
-                triggerShake(3); addStreakHit()
-                spawnParticles(G.currentBoss.x, G.currentBoss.y, 6, {{1,1,1},{1,1,0.533}})
-                Audio.sfxHit()
-                if G.currentBoss.hp <= 0 and not G.currentBoss.defeated then
-                    G.currentBoss.defeated = true; G.currentBoss.defeatTimer = 90
-                    G.bossFightState = "defeated"; Audio.sfxBossDefeat(); triggerShake(8)
-                    spawnParticles(G.currentBoss.x, G.currentBoss.y, 30, {{1,0.267,0.267},{1,0.667,0},{1,1,0.267},{1,1,1}})
-                end
-                if G.currentBoss.hp > 0 and G.currentBoss.hp <= G.currentBoss.maxHp * 0.5 and G.currentBoss.currentPhase == 1 then
-                    G.currentBoss.currentPhase = 2; G.currentBoss.attackTimer = 30
-                    spawnParticles(G.currentBoss.x, G.currentBoss.y, 15, {{1,0,1},{1,0.267,1},{1,0.667,1}})
-                end
-                break
-            end
-            ::continue_sushi_boss::
         end
     end
 
