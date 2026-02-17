@@ -3285,6 +3285,8 @@ function draw() {
       ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
       ctx.fillText(`MUSIC: ${musicMuted ? 'OFF' : 'ON'}  (press M)`, canvas.width / 2, canvas.height / 2 + 70)
     }
+  } else if (state === 'dialogue') {
+    drawDialogue()
   } else if (state === 'gameover') {
     drawScrollingBackground()
     drawParticles()
