@@ -10,7 +10,7 @@ local W, H = love.graphics.getDimensions()
 local isPortrait = H > W
 
 -- Game state
-local state = "menu"  -- menu, playing, gameover, levelIntro, levelComplete, victory, highscores, controls, dialogue, unlockModal
+local state = "splash"  -- splash, menu, playing, gameover, levelIntro, levelComplete, victory, highscores, controls, dialogue, unlockModal
 local score = 0
 local highScore = 0
 local lives = 3
@@ -28,6 +28,10 @@ local MENU_ITEMS = {"Start Game", "High Scores", "Controls"}
 local sushiThrowUnlocked = false
 local sushiUnlockShown = false
 local unlockModalTimer = 0
+
+-- Splash screen
+local splashTimer = 0
+local SPLASH_DURATION = 120  -- ~2 seconds at 60fps
 
 -- Screen transition
 local transitionAlpha = 0
@@ -543,6 +547,12 @@ function love.update(dt)
     frameCount = frameCount + 1
     updateTransition()
     updateShake()
+
+    if state == "splash" then
+        splashTimer = splashTimer + 1
+        if splashTimer >= SPLASH_DURATION then state = "menu" end
+        return
+    end
 
     if state == "dialogue" then
         if currentDialogue and not dialogueFullyRevealed then
@@ -1288,6 +1298,50 @@ local function drawMenuBackground()
     end
 end
 
+local function drawSplash()
+    love.graphics.setColor(0, 0, 0)
+    love.graphics.rectangle("fill", 0, 0, W, H)
+
+    -- Fade: in for first 30 frames, hold, out for last 30 frames
+    local alpha
+    if splashTimer < 30 then
+        alpha = splashTimer / 30
+    elseif splashTimer > SPLASH_DURATION - 30 then
+        alpha = (SPLASH_DURATION - splashTimer) / 30
+    else
+        alpha = 1
+    end
+
+    local cx, cy = W / 2, H / 2
+
+    -- Draw a heart
+    local heartScale = 2.5 + math.sin(splashTimer * 0.05) * 0.15
+    love.graphics.push()
+    love.graphics.translate(cx, cy - 30)
+    love.graphics.scale(heartScale, heartScale)
+    -- Heart shape using two circles and a polygon
+    love.graphics.setColor(0.91, 0.2, 0.35, alpha)
+    love.graphics.circle("fill", -5, -3, 7)
+    love.graphics.circle("fill", 5, -3, 7)
+    love.graphics.polygon("fill", -11, -1, 0, 12, 11, -1)
+    love.graphics.pop()
+
+    -- "Made with LÖVE" text
+    local font = love.graphics.newFont(isPortrait and 16 or 20)
+    love.graphics.setFont(font)
+    love.graphics.setColor(1, 1, 1, alpha)
+    love.graphics.printf("Made with L\195\150VE", 0, cy + 30, W, "center")
+
+    -- Subtle hint
+    if splashTimer > 60 then
+        local hintAlpha = math.min((splashTimer - 60) / 30, 1) * alpha * 0.4
+        local sf = love.graphics.newFont(isPortrait and 10 or 12)
+        love.graphics.setFont(sf)
+        love.graphics.setColor(1, 1, 1, hintAlpha)
+        love.graphics.printf("Press any key to skip", 0, H * 0.85, W, "center")
+    end
+end
+
 local menuItemBounds = {}
 
 local function drawMenu()
@@ -1600,7 +1654,9 @@ function love.draw()
         love.graphics.translate(shakeOffsetX, shakeOffsetY)
     end
 
-    if state == "menu" then
+    if state == "splash" then
+        drawSplash()
+    elseif state == "menu" then
         drawMenu()
     elseif state == "highscores" then
         drawHighScores()
@@ -1657,6 +1713,7 @@ end
 function love.keypressed(key)
     keys[key] = true
 
+    if state == "splash" then state = "menu"; return end
     if state == "menu" then
         if key == "up" or key == "w" then menuSelection = ((menuSelection - 2) % #MENU_ITEMS) + 1 end
         if key == "down" or key == "s" then menuSelection = (menuSelection % #MENU_ITEMS) + 1 end
@@ -1701,6 +1758,7 @@ end
 
 -- Touch support
 function love.touchpressed(id, x, y)
+    if state == "splash" then state = "menu"; return end
     if state == "menu" then
         for i, b in ipairs(menuItemBounds) do
             if x >= b.x and x <= b.x + b.w and y >= b.y and y <= b.y + b.h then
