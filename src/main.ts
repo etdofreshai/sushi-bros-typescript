@@ -608,7 +608,87 @@ function saveHighScore(s: number, lvl: number) {
 }
 
 // ─── State ───
-type GameState = 'menu' | 'playing' | 'gameover' | 'levelIntro' | 'levelComplete' | 'victory' | 'highscores' | 'controls'
+type GameState = 'menu' | 'playing' | 'gameover' | 'levelIntro' | 'levelComplete' | 'victory' | 'highscores' | 'controls' | 'dialogue'
+
+// ─── Dialogue/Cutscene System ───
+interface DialogueLine { speaker: string; text: string; speakerColor?: string }
+interface DialogueScene { lines: DialogueLine[]; onComplete: () => void }
+let currentDialogue: DialogueScene | null = null
+let dialogueIndex = 0
+let dialogueCharIndex = 0
+let dialogueCharTimer = 0
+const DIALOGUE_CHAR_SPEED = 2
+let dialogueFullyRevealed = false
+
+function startDialogue(scene: DialogueScene) {
+  currentDialogue = scene; dialogueIndex = 0; dialogueCharIndex = 0
+  dialogueCharTimer = 0; dialogueFullyRevealed = false; state = 'dialogue'
+}
+function advanceDialogue() {
+  if (!currentDialogue) return
+  if (!dialogueFullyRevealed) { dialogueFullyRevealed = true; dialogueCharIndex = currentDialogue.lines[dialogueIndex].text.length; return }
+  dialogueIndex++
+  if (dialogueIndex >= currentDialogue.lines.length) { const cb = currentDialogue.onComplete; currentDialogue = null; cb() }
+  else { dialogueCharIndex = 0; dialogueCharTimer = 0; dialogueFullyRevealed = false }
+}
+function getDialogueScene(id: string, onComplete: () => void): DialogueScene {
+  const S: Record<string, DialogueLine[]> = {
+    intro: [
+      { speaker: '', text: 'In a world where sushi is life, legends speak of the rarest ingredients hidden on a mysterious island far across the sea...' },
+      { speaker: 'Chef Toro', text: "I've spent my whole career perfecting the craft. But the ULTIMATE sushi? It requires ingredients no chef has ever tasted!", speakerColor: '#ff6b6b' },
+      { speaker: '', text: "The Sushi Brothers — legendary chefs of unmatched skill — have finally pinpointed the island's location." },
+      { speaker: 'Chef Toro', text: "There's just one tiny problem... the ocean is CRAWLING with hostile crabs, angry seagulls, and rival fishermen who want those ingredients for themselves.", speakerColor: '#ff6b6b' },
+      { speaker: 'Chef Toro', text: "Ha! As if that would stop me. Knife in hand, rice in heart — TIME TO SET SAIL! 🍣", speakerColor: '#ff6b6b' },
+    ],
+    afterLevel1: [
+      { speaker: 'Chef Toro', text: "Whew! That was one rough ocean crossing... I nearly got seasick AND sliced in half!", speakerColor: '#ff6b6b' },
+      { speaker: 'Chef Toro', text: "That giant sea creature was no joke. But nothing stops a chef on a mission!", speakerColor: '#ff6b6b' },
+      { speaker: '', text: 'Through the mist, a sandy beach emerges on the horizon...' },
+      { speaker: 'Chef Toro', text: "I can see the shore! Time to storm the beach and fight our way inland! 🏖️", speakerColor: '#ff6b6b' },
+    ],
+    afterLevel2: [
+      { speaker: 'Chef Toro', text: "Finally! Solid ground under my feet. Well... sandy ground, but still!", speakerColor: '#ff6b6b' },
+      { speaker: '', text: 'The dense jungle of the island interior looms ahead, thick with mystery and danger.' },
+      { speaker: 'Chef Toro', text: "I can practically SMELL the rare ingredients from here. Matsutake mushrooms? New tuna?! My chef senses are TINGLING!", speakerColor: '#ff6b6b' },
+      { speaker: 'Chef Toro', text: "Into the jungle we go. The ultimate sushi awaits! 🌴", speakerColor: '#ff6b6b' },
+    ],
+    afterLevel3: [
+      { speaker: 'Chef Toro', text: "I... I DID IT! The legendary ingredients are MINE!", speakerColor: '#ff6b6b' },
+      { speaker: '', text: 'Chef Toro holds up the shimmering, impossibly fresh ingredients — they glow with an otherworldly light.' },
+      { speaker: 'Chef Toro', text: "Golden uni from the deep caves... starlight wasabi... dragon-scale nori... It's all here!", speakerColor: '#ff6b6b' },
+      { speaker: 'Chef Toro', text: "The ultimate sushi is COMPLETE. The Sushi Brothers' legend will live FOREVER! 🍣✨🎉", speakerColor: '#ff6b6b' },
+    ],
+  }
+  return { lines: S[id] || [], onComplete }
+}
+function drawDialogue() {
+  if (!currentDialogue) return
+  const line = currentDialogue.lines[dialogueIndex]
+  ctx.fillStyle = 'rgba(0,0,20,0.85)'; ctx.fillRect(0, 0, canvas.width, canvas.height)
+  const cx = canvas.width / 2, fs = isPortrait ? 16 : 20, sfs = isPortrait ? 20 : 26
+  const pad = isPortrait ? 30 : 60, mw = canvas.width - pad * 2, sy = canvas.height * 0.3
+  if (line.speaker) {
+    ctx.font = `bold ${sfs}px monospace`; ctx.textAlign = 'center'
+    ctx.fillStyle = line.speakerColor || '#ffcc00'; ctx.fillText(line.speaker, cx, sy)
+  }
+  const vt = line.text.substring(0, dialogueCharIndex)
+  ctx.font = `${fs}px monospace`; ctx.fillStyle = '#fff'; ctx.textAlign = 'center'
+  const words = vt.split(' '); const wlines: string[] = []; let cl = ''
+  for (const w of words) { const t = cl ? cl + ' ' + w : w; if (ctx.measureText(t).width > mw && cl) { wlines.push(cl); cl = w } else cl = t }
+  if (cl) wlines.push(cl)
+  const lh = fs * 1.5, tsy = sy + 40
+  for (let i = 0; i < wlines.length; i++) ctx.fillText(wlines[i], cx, tsy + i * lh)
+  if (dialogueFullyRevealed && Math.floor(frameCount / 30) % 2 === 0) {
+    ctx.font = `${isPortrait ? 12 : 16}px monospace`; ctx.fillStyle = 'rgba(255,255,255,0.7)'
+    ctx.fillText(isTouchDevice ? '▼ Tap to continue' : '▼ Press Enter', cx, canvas.height * 0.8)
+  }
+  const dotY = canvas.height * 0.88, td = currentDialogue.lines.length, ds = 12, dsx = cx - ((td - 1) * ds) / 2
+  for (let i = 0; i < td; i++) {
+    ctx.beginPath(); ctx.arc(dsx + i * ds, dotY, i === dialogueIndex ? 4 : 2.5, 0, Math.PI * 2)
+    ctx.fillStyle = i === dialogueIndex ? '#fff' : 'rgba(255,255,255,0.3)'; ctx.fill()
+  }
+}
+
 let state: GameState = 'menu'
 let score = 0
 let highScore = parseInt(localStorage.getItem('sushi-bros-hi') || '0')
@@ -677,6 +757,7 @@ addEventListener('keydown', e => {
   if (state === 'highscores' || state === 'controls') {
     if (e.code === 'Escape' || e.code === 'Enter') { state = 'menu' }
   }
+  if (state === 'dialogue' && (e.code === 'Enter' || e.code === 'Space')) { advanceDialogue(); return }
   if (state === 'gameover' && e.code === 'Enter') startTransition(() => startNewRun())
   if (state === 'gameover' && e.code === 'Escape') startTransition(() => { state = 'menu'; stopMusic() })
   if (state === 'levelComplete' && e.code === 'Enter') advanceLevel()
@@ -756,6 +837,7 @@ canvas.addEventListener('touchstart', e => {
     const t0 = e.changedTouches[0]
     handleMenuClick(t0.clientX, t0.clientY); return
   }
+  if (state === 'dialogue') { advanceDialogue(); return }
   if (state === 'highscores' || state === 'controls') { state = 'menu'; return }
   if (state === 'gameover') {
     const t0 = e.changedTouches[0]
@@ -933,7 +1015,7 @@ function startNewRun() {
   if (audioCtx.state === 'suspended') audioCtx.resume()
   score = 0; lives = 3; currentLevel = 0
   resetStreak()
-  beginLevel(0)
+  startDialogue(getDialogueScene('intro', () => beginLevel(0)))
 }
 
 function beginLevel(level: number) {
@@ -960,10 +1042,13 @@ function beginLevel(level: number) {
 }
 
 function advanceLevel() {
+  const sceneIds = ['afterLevel1', 'afterLevel2', 'afterLevel3']
+  const sceneId = sceneIds[currentLevel]
   if (currentLevel < LEVEL_CONFIGS.length - 1) {
-    startTransition(() => beginLevel(currentLevel + 1))
+    const nextLevel = currentLevel + 1
+    startTransition(() => startDialogue(getDialogueScene(sceneId, () => beginLevel(nextLevel))))
   } else {
-    startTransition(() => { saveHighScore(score, currentLevel + 1); state = 'victory'; playVictoryJingle(); stopMusic() })
+    startTransition(() => startDialogue(getDialogueScene(sceneId, () => { saveHighScore(score, currentLevel + 1); state = 'victory'; playVictoryJingle(); stopMusic() })))
   }
 }
 
@@ -1095,6 +1180,15 @@ function update() {
   updateTransition()
   updateShake()
 
+  if (state === 'dialogue') {
+    if (currentDialogue && !dialogueFullyRevealed) {
+      dialogueCharTimer++
+      if (dialogueCharTimer >= DIALOGUE_CHAR_SPEED) { dialogueCharTimer = 0; dialogueCharIndex++
+        if (dialogueCharIndex >= currentDialogue.lines[dialogueIndex].text.length) dialogueFullyRevealed = true
+      }
+    }
+    return
+  }
   if (state === 'menu' || state === 'gameover' || state === 'highscores' || state === 'controls' || state === 'levelComplete' || state === 'victory') return
   if (state === 'levelIntro') {
     levelIntroTimer--
@@ -3131,6 +3225,8 @@ function draw() {
       ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
       ctx.fillText(`MUSIC: ${musicMuted ? 'OFF' : 'ON'}  (press M)`, canvas.width / 2, canvas.height / 2 + 70)
     }
+  } else if (state === 'dialogue') {
+    drawDialogue()
   } else if (state === 'gameover') {
     drawScrollingBackground()
     drawParticles()
