@@ -508,8 +508,230 @@ function F.updatePowerUps()
     end
 end
 
+-- ─── Draw helpers ───
+function F.drawScrollingBackground()
+    local rowH = 4
+    for screenY = 0, H, rowH do
+        local worldY = G.scrollY + (H - screenY)
+        local c = Levels.getTerrainColor(G.currentLevel, worldY)
+        love.graphics.setColor(c[1], c[2], c[3])
+        love.graphics.rectangle("fill", 0, screenY, W, rowH + 1)
+    end
 
-function love.draw()
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.print("First 510 lines loaded OK!", 100, 100)
+    for screenY = 0, H, 3 do
+        local worldY = G.scrollY + (H - screenY)
+        if Levels.getTerrainAt(G.currentLevel, worldY) == "water" then
+            local waveOffset = math.sin(worldY * 0.02 + G.frameCount * 0.03) * 15
+            love.graphics.setColor(0.392, 0.706, 1, 0.15)
+            love.graphics.setLineWidth(1)
+            local points = {}
+            for x = 0, W, 20 do
+                local wy = screenY + math.sin((x + waveOffset) * 0.03 + worldY * 0.01) * 3
+                table.insert(points, x); table.insert(points, wy)
+            end
+            if #points >= 4 then love.graphics.line(points) end
+        end
+    end
+
+    if G.currentLevel ~= 3 then
+        local gridSize = 300
+        local startRow = math.floor(G.scrollY / gridSize) - 1
+        local endRow = math.floor((G.scrollY + H) / gridSize) + 1
+        for row = startRow, endRow do
+            local seed = (row * 4517 + 9929) % 0x7FFFFFFF
+            local wY = row * gridSize + (seed % gridSize)
+            if Levels.getTerrainAt(G.currentLevel, wY) == "grass" then
+                local sy = H - (wY - G.scrollY)
+                if sy > -20 and sy < H + 20 then
+                    local sx = ((seed * 7) % 0x7FFFFFFF) % W
+                    love.graphics.setColor(0.353, 0.227, 0.102)
+                    love.graphics.rectangle("fill", sx - 3, sy - 5, 6, 12)
+                    love.graphics.setColor(0.102, 0.416, 0.102)
+                    love.graphics.circle("fill", sx, sy - 10, 10 + (seed % 5))
+                end
+            end
+        end
+    end
+
+    if G.currentLevel == 3 then
+        for _, tree in ipairs(G.treeObstacles) do
+            local sy = H - (tree.worldY - G.scrollY)
+            if sy > -30 and sy < H + 30 then
+                love.graphics.setColor(0.29, 0.165, 0.039)
+                love.graphics.rectangle("fill", tree.worldX - 4, sy - 4, 8, 16)
+                love.graphics.setColor(0.051, 0.353, 0.051)
+                love.graphics.circle("fill", tree.worldX, sy - 10, tree.radius)
+            end
+        end
+    end
+
+    if G.currentLevel == 1 and G.scrollY < 1800 then
+        for i = 0, 4 do
+            local bWorldY = 150 + i * 350
+            local bScreenY = H - (bWorldY - G.scrollY)
+            if bScreenY > -30 and bScreenY < H + 30 then
+                local bx = 60 + ((i * 137) % (W - 120))
+                local bob = math.sin(G.frameCount * 0.05 + bx * 0.07) * 5
+                love.graphics.push()
+                love.graphics.translate(bx, bScreenY + bob)
+                love.graphics.setColor(0.545, 0.271, 0.075)
+                love.graphics.polygon("fill", -20, 0, -15, 10, 15, 10, 20, 0)
+                love.graphics.setColor(0.396, 0.263, 0.129)
+                love.graphics.rectangle("fill", -1, -20, 2, 20)
+                love.graphics.setColor(0.961, 0.961, 0.863)
+                love.graphics.polygon("fill", 0, -18, 12, -6, 0, -4)
+                love.graphics.pop()
+            end
+        end
+    end
 end
+
+function F.drawPlayer()
+    if not G.player.visible then return end
+    if G.player.invulnTimer > 0 and math.floor(G.frameCount / 4) % 2 == 0 then return end
+
+    local px, py = G.player.x, G.player.y
+    local pwY = G.scrollY + (H - py)
+    local isOnWater = Levels.getTerrainAt(G.currentLevel, pwY) == "water"
+
+    if isOnWater then
+        love.graphics.push()
+        love.graphics.translate(px, py)
+        love.graphics.setColor(0.545, 0.271, 0.075)
+        love.graphics.polygon("fill", -22, 8, -16, 18, 16, 18, 22, 8)
+        love.graphics.setColor(0.627, 0.322, 0.176)
+        love.graphics.rectangle("fill", -14, 6, 28, 4)
+        love.graphics.pop()
+    end
+
+    love.graphics.push()
+    love.graphics.translate(px, py)
+    if isOnWater then love.graphics.translate(0, math.sin(G.frameCount * 0.05) * 5 - 4) end
+
+    if G.playerIsMoving and not isOnWater then
+        local wobbleX = math.sin(G.playerWalkTimer * 0.3) * 1.5
+        local wobbleY = math.abs(math.sin(G.playerWalkTimer * 0.3)) * -1.5
+        love.graphics.translate(wobbleX, wobbleY)
+    end
+
+    if G.playerShootAnim > 0 then
+        local t = G.playerShootAnim / 14
+        local expand = (14 - G.playerShootAnim) * 2.5
+        love.graphics.setColor(1, 1, 0.392, t * 0.85)
+        love.graphics.setLineWidth(3 * t)
+        love.graphics.circle("line", 0, 0, 14 + expand)
+    end
+
+    if not isOnWater then
+        local legPhase = G.playerWalkTimer * 0.25
+        local leftY = G.playerIsMoving and math.sin(legPhase) * 4 or 0
+        local rightY = G.playerIsMoving and math.sin(legPhase + math.pi) * 4 or 0
+        love.graphics.setColor(0.533, 0.533, 0.6)
+        love.graphics.ellipse("fill", -5, 14 + leftY, 4, 3.5)
+        love.graphics.ellipse("fill", 5, 14 + rightY, 4, 3.5)
+    end
+
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.circle("fill", 0, 2, 12)
+    love.graphics.setColor(0.8, 0.8, 0.8)
+    love.graphics.setLineWidth(1)
+    love.graphics.circle("line", 0, 2, 12)
+
+    love.graphics.setColor(1, 0.8, 0.533)
+    love.graphics.circle("fill", 0, -6, 8)
+
+    love.graphics.setColor(1, 1, 1)
+    love.graphics.rectangle("fill", -6, -18, 12, 10)
+    love.graphics.circle("fill", 0, -18, 7)
+
+    local ex = math.cos(G.player.facing) * 2
+    local ey = math.sin(G.player.facing) * 2
+    love.graphics.setColor(0, 0, 0)
+    love.graphics.circle("fill", -3 + ex*0.5, -7 + ey*0.5, 1.5)
+    love.graphics.circle("fill", 3 + ex*0.5, -7 + ey*0.5, 1.5)
+
+    love.graphics.pop()
+
+    if G.poleSwing then
+        local endX = px + math.cos(G.poleSwing.angle) * G.poleSwing.radius
+        local endY = py + math.sin(G.poleSwing.angle) * G.poleSwing.radius
+        love.graphics.setColor(0.545, 0.412, 0.078)
+        love.graphics.setLineWidth(3)
+        love.graphics.line(px, py, endX, endY)
+        love.graphics.setColor(0.8, 0.8, 0.8)
+        love.graphics.setLineWidth(2)
+        love.graphics.arc("line", "open", endX, endY, 5, 0, math.pi)
+        local progress = 1 - G.poleSwing.timer / G.poleSwing.maxTimer
+        love.graphics.setColor(1, 1, 0.784, 0.5 * (1 - progress))
+        love.graphics.setLineWidth(2)
+        love.graphics.arc("line", "open", px, py, G.poleSwing.radius, G.poleSwing.angle - 0.5, G.poleSwing.angle)
+    end
+end
+
+function F.drawEnemy(en)
+    love.graphics.push()
+    love.graphics.translate(en.x, en.y)
+
+    if en.etype == "crab" then
+        love.graphics.setColor(0.8, 0.2, 0.2)
+        love.graphics.ellipse("fill", 0, 0, 14, 10)
+        love.graphics.setColor(0.933, 0.267, 0.267)
+        love.graphics.circle("fill", -16, -4, 6)
+        love.graphics.circle("fill", 16, -4, 6)
+        love.graphics.setColor(0, 0, 0)
+        love.graphics.circle("fill", -4, -5, 2)
+        love.graphics.circle("fill", 4, -5, 2)
+        love.graphics.setColor(0.8, 0.2, 0.2)
+        love.graphics.setLineWidth(1.5)
+        for _, side in ipairs({-1, 1}) do
+            for j = 0, 2 do
+                local lx = side * (6 + j * 4)
+                love.graphics.line(lx, 4, lx + side * 5, 6 + math.sin(en.animFrame * 0.15 + j) * 2)
+            end
+        end
+
+    elseif en.etype == "seagull" then
+        love.graphics.setColor(0.933, 0.933, 0.933)
+        love.graphics.ellipse("fill", 0, 0, 8, 6)
+        local wingFlap = math.sin(en.animFrame * 0.15) * 15
+        love.graphics.setColor(0.867, 0.867, 0.867)
+        love.graphics.polygon("fill", -5, 0, -18, -wingFlap, -12, 2)
+        love.graphics.polygon("fill", 5, 0, 18, -wingFlap, 12, 2)
+        love.graphics.setColor(1, 0.533, 0)
+        love.graphics.polygon("fill", 0, -4, -2, -8, 2, -8)
+        love.graphics.setColor(0, 0, 0)
+        love.graphics.circle("fill", 0, -2, 1.5)
+
+    elseif en.etype == "fisherman" then
+        local CHARGE_THRESHOLD = 60
+        if en.shootTimer > 0 and en.shootTimer <= CHARGE_THRESHOLD then
+            local chargeT = 1 - en.shootTimer / CHARGE_THRESHOLD
+            local glowR = en.radius + 4 + chargeT * 14
+            local gColor = (1 - chargeT) * 0.647
+            love.graphics.setColor(1, gColor, 0, 0.15 + chargeT * 0.45)
+            love.graphics.circle("fill", 0, 0, glowR)
+        end
+
+        love.graphics.setColor(0.2, 0.333, 0.667)
+        love.graphics.circle("fill", 0, 2, 13)
+        love.graphics.setColor(0.867, 0.659, 0.467)
+        love.graphics.circle("fill", 0, -7, 8)
+        love.graphics.setColor(0.333, 0.4, 0.2)
+        love.graphics.rectangle("fill", -9, -14, 18, 5)
+        love.graphics.rectangle("fill", -7, -18, 14, 5)
+        love.graphics.setColor(0, 0, 0)
+        love.graphics.rectangle("fill", -5, -8, 3, 2)
+        love.graphics.rectangle("fill", 2, -8, 3, 2)
+        love.graphics.setColor(0.545, 0.412, 0.078)
+        love.graphics.setLineWidth(2)
+        love.graphics.line(10, 0, 18, -15)
+        love.graphics.setColor(0.667, 0.667, 0.667)
+        love.graphics.setLineWidth(0.5)
+        love.graphics.line(18, -15, 20, -10)
+    end
+
+    love.graphics.pop()
+end
+
+
+function love.draw() love.graphics.setColor(1,1,1); love.graphics.print("735 lines OK!", 100, 100) end
