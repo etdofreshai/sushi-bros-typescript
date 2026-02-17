@@ -93,15 +93,17 @@
       };
       Module.setStatus('Downloading...');
       window.onerror = function(event) {
-        // TODO: do not warn on ok events like simulating an infinite loop or exitStatus
-        Module.setStatus('Exception thrown, see JavaScript console');
-        Module.setStatus = function(text) {
-          if (text) Module.printErr('[post-exception status] ' + text);
-        };
+        console.warn('[love.js onerror]', event);
+        // Don't override setStatus — let the game continue even if non-fatal errors occur
       };
 
       var applicationLoad = function(e) {
         Love(Module);
+        // Ensure canvas is visible after load
+        setTimeout(function() {
+          document.getElementById('loadingCanvas').style.display = 'none';
+          document.getElementById('canvas').style.visibility = 'visible';
+        }, 1000);
       }
     </script>
     <script type="text/javascript" src="game.js"></script>
