@@ -99,11 +99,16 @@
 
       var applicationLoad = function(e) {
         Love(Module);
-        // Ensure canvas is visible after load
-        setTimeout(function() {
+        // Force canvas visible on multiple timers
+        function showCanvas() {
           document.getElementById('loadingCanvas').style.display = 'none';
           document.getElementById('canvas').style.visibility = 'visible';
-        }, 1000);
+          document.getElementById('canvas').style.width = '800px';
+          document.getElementById('canvas').style.height = '600px';
+        }
+        setTimeout(showCanvas, 500);
+        setTimeout(showCanvas, 2000);
+        setTimeout(showCanvas, 5000);
       }
     </script>
     <script type="text/javascript" src="game.js"></script>
