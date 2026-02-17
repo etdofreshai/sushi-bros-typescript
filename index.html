@@ -8,6 +8,21 @@
 
     <!-- SharedArrayBuffer polyfill for environments without COOP/COEP headers -->
     <script>if(typeof SharedArrayBuffer==='undefined'){window.SharedArrayBuffer=ArrayBuffer;}</script>
+    <!-- Intercept LÖVE's C-level alert to show error on page instead of blocking dialog -->
+    <script>
+      window._origAlert = window.alert;
+      window.alert = function(msg) {
+        console.error('[LÖVE alert intercepted]', msg);
+        var div = document.getElementById('error-overlay');
+        if (!div) {
+          div = document.createElement('div');
+          div.id = 'error-overlay';
+          div.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.9);color:#ff6666;font:14px monospace;padding:20px;overflow:auto;z-index:9999;white-space:pre-wrap;';
+          document.body.appendChild(div);
+        }
+        div.textContent = msg;
+      };
+    </script>
     <!-- Load custom style sheet -->
     <link rel="stylesheet" type="text/css" href="theme/love.css">
   </head>
