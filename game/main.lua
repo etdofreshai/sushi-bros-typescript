@@ -1,26 +1,23 @@
--- Test: can we even PARSE game_main.lua?
-local status = "testing..."
+-- Main entry point - loads modules then game_main with error handling
+local results = {}
 
--- Step 1: just load (compile) without executing
-local ok1, err1 = pcall(function()
-    local chunk, lerr = love.filesystem.load("game_main.lua")
-    if not chunk then error("load: " .. tostring(lerr)) end
-end)
-status = "compile game_main: " .. tostring(ok1)
-if not ok1 then status = status .. "\nERR: " .. tostring(err1) end
+local ok1, err1 = pcall(function() require("audio") end)
+table.insert(results, "audio: " .. tostring(ok1) .. (ok1 and "" or " ERR: " .. tostring(err1)))
 
--- Step 2: if compile works, try executing just the first few lines
-if ok1 then
-    local ok2, err2 = pcall(function()
-        -- Load and execute
-        local chunk = love.filesystem.load("game_main.lua")
-        chunk()
-    end)
-    status = status .. "\nexec game_main: " .. tostring(ok2)
-    if not ok2 then status = status .. "\nERR: " .. tostring(err2) end
-end
+local ok2, err2 = pcall(function() require("levels") end)
+table.insert(results, "levels: " .. tostring(ok2) .. (ok2 and "" or " ERR: " .. tostring(err2)))
 
-function love.draw()
-    love.graphics.setColor(1, 1, 1)
-    love.graphics.printf(status, 10, 30, 780)
+local ok3, err3 = pcall(function() require("boss") end)
+table.insert(results, "boss: " .. tostring(ok3) .. (ok3 and "" or " ERR: " .. tostring(err3)))
+
+local ok4, err4 = pcall(function() require("game_main") end)
+table.insert(results, "game_main: " .. tostring(ok4) .. (ok4 and "" or " ERR: " .. tostring(err4)))
+
+-- If game_main loaded, love.load/update/draw are set. Wrap them for safety.
+if not ok4 then
+    local loadLog = table.concat(results, "\n")
+    function love.draw()
+        love.graphics.setColor(1, 0, 0)
+        love.graphics.printf("LOAD ERROR:\n" .. loadLog, 10, 10, 780)
+    end
 end
