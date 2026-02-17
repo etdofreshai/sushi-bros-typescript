@@ -414,6 +414,11 @@ function playVictoryJingle() {
 // ─── Water Splash Tracking ───
 let playerWasOnWater = false
 
+// ─── Player Animation State ───
+let playerIsMoving = false
+let playerWalkTimer = 0
+let playerShootAnim = 0 // frames remaining for shoot/cast flash
+
 // ─── Types ───
 interface Vec2 { x: number; y: number }
 
@@ -964,6 +969,7 @@ function throwSushi() {
   if (state !== 'playing' || !player.visible || sushis.length >= 10) return
   if (audioCtx.state === 'suspended') audioCtx.resume()
   sfxSushiThrow()
+  playerShootAnim = 14 // trigger throw flash animation
   const speed = 7
   const angle = (isTouchDevice && fireActive) ? shootAngle : player.facing
   const angles = activeTriple > 0 ? [angle - 0.2, angle, angle + 0.2] : [angle]
@@ -984,6 +990,7 @@ function activatePole() {
   if (state !== 'playing' || !player.visible || poleSwing) return
   if (audioCtx.state === 'suspended') audioCtx.resume()
   sfxPoleSwing()
+  playerShootAnim = 14 // trigger cast flash animation
   poleSwing = {
     angle: player.facing - Math.PI * 0.6,
     timer: 20,
@@ -1250,6 +1257,11 @@ function update() {
   // Keep player on screen
   player.pos.x = Math.max(player.radius, Math.min(canvas.width - player.radius, player.pos.x))
   player.pos.y = Math.max(player.radius + 20, Math.min(canvas.height - player.radius - 20, player.pos.y))
+
+  // Track player animation state
+  playerIsMoving = moveLen > 0
+  if (playerIsMoving) playerWalkTimer++
+  if (playerShootAnim > 0) playerShootAnim--
 
   // Camera: player is clamped to the bottom 40% of the screen.
   // When they'd move higher than 60% from the top, the camera scrolls instead.
@@ -2451,7 +2463,12 @@ function drawLevelDecorations() {
 
 function drawBoat(x: number, y: number) {
   ctx.save()
-  ctx.translate(x, y)
+  // Each scenery boat gets its own bob/tilt phase based on x position
+  const bobPhase = x * 0.07
+  const bob = Math.sin(frameCount * 0.05 + bobPhase) * 5
+  const tilt = Math.sin(frameCount * 0.03 + bobPhase + 1.0) * 0.07
+  ctx.translate(x, y + bob)
+  ctx.rotate(tilt)
   // Hull
   ctx.fillStyle = '#8B4513'
   ctx.beginPath()
@@ -2490,8 +2507,10 @@ function drawPlayer() {
     // Boat deck
     ctx.fillStyle = '#A0522D'
     ctx.fillRect(-14, 6, 28, 4)
-    // Gentle bob
-    const bob = Math.sin(frameCount * 0.04) * 1.5
+    // Bobbing animation — more pronounced than before
+    const bob = Math.sin(frameCount * 0.05) * 5
+    const tilt = Math.sin(frameCount * 0.03 + 1.0) * 0.06
+    ctx.rotate(tilt)
     ctx.translate(0, bob)
     // Wake lines behind boat
     ctx.strokeStyle = 'rgba(255,255,255,0.15)'
@@ -2505,9 +2524,47 @@ function drawPlayer() {
 
   ctx.save()
   ctx.translate(px, py)
-  // Bob on water
+  // Bob on water (synced with boat)
   if (isOnWater) {
-    ctx.translate(0, Math.sin(frameCount * 0.04) * 1.5 - 4)
+    ctx.translate(0, Math.sin(frameCount * 0.05) * 5 - 4)
+  }
+
+  // Walking animation: body wobble + foot alternation on land
+  if (playerIsMoving && !isOnWater) {
+    const walkPhase = playerWalkTimer * 0.3
+    const wobbleX = Math.sin(walkPhase) * 1.5
+    const wobbleY = Math.abs(Math.sin(walkPhase)) * -1.5
+    ctx.translate(wobbleX, wobbleY)
+  }
+
+  // Shoot/cast flash effect: expanding ring + directional burst
+  if (playerShootAnim > 0) {
+    const t = playerShootAnim / 14
+    const expand = (14 - playerShootAnim) * 2.5
+    // Expanding ring
+    ctx.strokeStyle = `rgba(255, 255, 100, ${t * 0.85})`
+    ctx.lineWidth = 3 * t
+    ctx.beginPath()
+    ctx.arc(0, 0, 14 + expand, 0, Math.PI * 2)
+    ctx.stroke()
+    // Directional burst line
+    const burstEnd = 16 + expand + 10
+    ctx.strokeStyle = `rgba(255, 200, 50, ${t})`
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.moveTo(Math.cos(player.facing) * 13, Math.sin(player.facing) * 13)
+    ctx.lineTo(Math.cos(player.facing) * burstEnd, Math.sin(player.facing) * burstEnd)
+    ctx.stroke()
+  }
+
+  // Legs/feet — drawn before body so body circle covers the tops naturally
+  if (!isOnWater) {
+    const legPhase = playerWalkTimer * 0.25
+    const leftY  = playerIsMoving ? Math.sin(legPhase)           * 4 : 0
+    const rightY = playerIsMoving ? Math.sin(legPhase + Math.PI) * 4 : 0
+    ctx.fillStyle = '#888899'
+    ctx.beginPath(); ctx.ellipse(-5, 14 + leftY,  4, 3.5, 0, 0, Math.PI * 2); ctx.fill()
+    ctx.beginPath(); ctx.ellipse( 5, 14 + rightY, 4, 3.5, 0, 0, Math.PI * 2); ctx.fill()
   }
 
   // Body (white chef outfit)
@@ -2634,6 +2691,28 @@ function drawEnemy(en: Enemy) {
     ctx.fillStyle = '#000000'
     ctx.beginPath(); ctx.arc(0, -2, 1.5, 0, Math.PI * 2); ctx.fill()
   } else if (en.type === 'fisherman') {
+    // ── Charge-up glow: builds for the last 60 frames before shooting ──
+    const CHARGE_THRESHOLD = 60
+    if (en.shootTimer > 0 && en.shootTimer <= CHARGE_THRESHOLD) {
+      const chargeT = 1 - en.shootTimer / CHARGE_THRESHOLD // 0→1 as countdown nears 0
+      const glowR = en.radius + 4 + chargeT * 14
+      const gColor = Math.floor(165 * (1 - chargeT)) // orange→red as charge builds
+      // Inner fill glow
+      ctx.fillStyle = `rgba(255, ${gColor}, 0, ${0.15 + chargeT * 0.45})`
+      ctx.beginPath(); ctx.arc(0, 0, glowR, 0, Math.PI * 2); ctx.fill()
+      // Pulsing outer ring — pulses faster as charge nears full
+      const pulseFreq = 0.08 + chargeT * 0.3
+      const pulseA = 0.5 + 0.5 * Math.sin(frameCount * pulseFreq * Math.PI * 2)
+      ctx.strokeStyle = `rgba(255, ${gColor}, 0, ${(0.35 + chargeT * 0.55) * pulseA})`
+      ctx.lineWidth = 1.5 + chargeT * 2.5
+      ctx.beginPath(); ctx.arc(0, 0, glowR + 4, 0, Math.PI * 2); ctx.stroke()
+      // At very high charge: additional bright flash sparks
+      if (chargeT > 0.75 && Math.floor(frameCount / 3) % 2 === 0) {
+        ctx.fillStyle = `rgba(255, 200, 50, 0.4)`
+        ctx.beginPath(); ctx.arc(0, 0, glowR + 8, 0, Math.PI * 2); ctx.fill()
+      }
+    }
+
     // Body (blue jacket)
     ctx.fillStyle = '#3355aa'
     ctx.beginPath()
@@ -2652,7 +2731,7 @@ function drawEnemy(en: Enemy) {
     ctx.fillStyle = '#000000'
     ctx.fillRect(-5, -8, 3, 2)
     ctx.fillRect(2, -8, 3, 2)
-    // Fishing rod
+    // Fishing rod — tip glows red when fully charged
     ctx.strokeStyle = '#8B6914'; ctx.lineWidth = 2
     ctx.beginPath()
     ctx.moveTo(10, 0); ctx.lineTo(18, -15)
@@ -2661,6 +2740,12 @@ function drawEnemy(en: Enemy) {
     ctx.beginPath()
     ctx.moveTo(18, -15); ctx.lineTo(20, -10)
     ctx.stroke()
+    // Rod tip glow when charge is building
+    if (en.shootTimer > 0 && en.shootTimer <= CHARGE_THRESHOLD) {
+      const chargeT = 1 - en.shootTimer / CHARGE_THRESHOLD
+      ctx.fillStyle = `rgba(255, ${Math.floor(165 * (1 - chargeT))}, 0, ${0.5 + chargeT * 0.5})`
+      ctx.beginPath(); ctx.arc(20, -10, 3 + chargeT * 3, 0, Math.PI * 2); ctx.fill()
+    }
   }
 
   ctx.restore()
