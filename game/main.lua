@@ -2,7 +2,9 @@
 local _error = nil
 
 local ok, err = xpcall(function()
-    dofile("game_main.lua")
+    local chunk, loadErr = love.filesystem.load("game_main.lua")
+    if not chunk then error(loadErr) end
+    chunk()
 end, function(e)
     return tostring(e) .. "\n" .. debug.traceback()
 end)
