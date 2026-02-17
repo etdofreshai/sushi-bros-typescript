@@ -1,2 +1,5 @@
--e node_modules
+node_modules
 dist
+lovejs-output
+sushi-bros.love
+node_modules

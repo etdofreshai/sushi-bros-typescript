@@ -3,9 +3,11 @@
   "private": true,
   "version": "1.0.0",
   "scripts": {
+    "build:love": "cd game && zip -r ../sushi-bros.love . && cd .. && npx love.js -t 'Sushi Bros' sushi-bros.love lovejs-output && cp lovejs-output/game.data lovejs-output/game.js lovejs-output/love.js lovejs-output/love.wasm lovejs-output/love.worker.js public/ && cp -r lovejs-output/theme public/",
     "dev": "vite"
   },
   "dependencies": {
+    "love.js": "^11.4.1",
     "vite": "^6.4.1"
   },
   "devDependencies": {
