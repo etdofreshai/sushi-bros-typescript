@@ -709,6 +709,7 @@ let treeObstacles: TreeObstacle[] = []
 let nextTreeWorldY = 0
 let frameCount = 0
 let paused = false
+let confirmingQuit = false
 let distance = 0
 let currentLevel = 0 // 0-indexed
 let levelIntroTimer = 0
@@ -768,7 +769,13 @@ addEventListener('keydown', e => {
   if (state === 'levelComplete' && e.code === 'Enter') advanceLevel()
   if (state === 'victory' && e.code === 'Enter') startTransition(() => startNewRun())
   if (state === 'victory' && e.code === 'Escape') startTransition(() => { state = 'menu'; stopMusic() })
-  if (state === 'playing' && (e.code === 'Escape' || e.code === 'KeyP')) { paused = !paused }
+  if (state === 'playing' && paused && confirmingQuit) {
+    if (e.code === 'KeyY' || e.code === 'Enter') { confirmingQuit = false; paused = false; startTransition(() => { state = 'menu'; stopMusic() }) }
+    if (e.code === 'KeyN' || e.code === 'Escape') { confirmingQuit = false }
+    return
+  }
+  if (state === 'playing' && (e.code === 'Escape' || e.code === 'KeyP')) { paused = !paused; confirmingQuit = false }
+  if (state === 'playing' && e.code === 'KeyQ' && paused) { confirmingQuit = true }
   if (state === 'playing' && e.code === 'KeyM' && paused) { toggleMusicMute() }
 })
 addEventListener('keyup', e => { keys[e.code] = false })
@@ -857,10 +864,11 @@ canvas.addEventListener('touchstart', e => {
   }
   {
     const t0 = e.changedTouches[0]
+    if (paused && handlePauseMenuClick(t0.clientX, t0.clientY)) return
     const pb = pauseBtnBounds()
     if (t0.clientX >= pb.x - 10 && t0.clientX <= pb.x + pb.w + 10 &&
         t0.clientY >= pb.y - 10 && t0.clientY <= pb.y + pb.h + 10) {
-      paused = !paused; return
+      paused = !paused; confirmingQuit = false; return
     }
   }
   for (let i = 0; i < e.changedTouches.length; i++) {
@@ -950,13 +958,48 @@ function pauseBtnBounds() {
   return { x: canvas.width - PAUSE_BTN_SIZE - 15, y: 42, w: PAUSE_BTN_SIZE, h: PAUSE_BTN_SIZE }
 }
 
+function handlePauseMenuClick(cx: number, cy: number): boolean {
+  const qBtnW = isPortrait ? 180 : 220
+  const qBtnH = isPortrait ? 36 : 40
+  const qBtnX = canvas.width / 2 - qBtnW / 2
+  const qBtnY = canvas.height / 2 + 95
+
+  if (confirmingQuit) {
+    const mW = isPortrait ? 260 : 320
+    const mH = isPortrait ? 150 : 160
+    const mX = canvas.width / 2 - mW / 2
+    const mY = canvas.height / 2 - mH / 2
+    const btnW = 90; const btnH = 36; const gap = 20
+    const yesX = canvas.width / 2 - btnW - gap / 2; const noX = canvas.width / 2 + gap / 2
+    const btnY2 = mY + mH - 55
+    if (cx >= yesX && cx <= yesX + btnW && cy >= btnY2 && cy <= btnY2 + btnH) {
+      confirmingQuit = false; paused = false; startTransition(() => { state = 'menu'; stopMusic() })
+      return true
+    }
+    if (cx >= noX && cx <= noX + btnW && cy >= btnY2 && cy <= btnY2 + btnH) {
+      confirmingQuit = false
+      return true
+    }
+    return true // consume click when modal is open
+  }
+
+  if (cx >= qBtnX && cx <= qBtnX + qBtnW && cy >= qBtnY && cy <= qBtnY + qBtnH) {
+    confirmingQuit = true
+    return true
+  }
+  return false
+}
+
 canvas.addEventListener('click', e => {
   if (state === 'menu') handleMenuClick(e.clientX, e.clientY)
   if (state === 'highscores' || state === 'controls') { state = 'menu' }
   if (state === 'playing') {
+    if (paused) {
+      if (handlePauseMenuClick(e.clientX, e.clientY)) return
+    }
     const pb = pauseBtnBounds()
     if (e.clientX >= pb.x && e.clientX <= pb.x + pb.w && e.clientY >= pb.y && e.clientY <= pb.y + pb.h) {
-      paused = !paused
+      paused = !paused; confirmingQuit = false
     }
   }
   if (state === 'gameover') handleGameOverClick(e.clientX, e.clientY)
@@ -3309,6 +3352,48 @@ function draw() {
       // Mute toggle in pause menu
       ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
       ctx.fillText(`MUSIC: ${musicMuted ? 'OFF' : 'ON'}  (press M)`, canvas.width / 2, canvas.height / 2 + 70)
+
+      // Quit to Menu button
+      const qBtnW = isPortrait ? 180 : 220
+      const qBtnH = isPortrait ? 36 : 40
+      const qBtnX = canvas.width / 2 - qBtnW / 2
+      const qBtnY = canvas.height / 2 + 95
+      ctx.fillStyle = 'rgba(180,60,60,0.7)'
+      ctx.beginPath(); ctx.roundRect(qBtnX, qBtnY, qBtnW, qBtnH, 8); ctx.fill()
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1
+      ctx.beginPath(); ctx.roundRect(qBtnX, qBtnY, qBtnW, qBtnH, 8); ctx.stroke()
+      ctx.fillStyle = '#ffffff'; ctx.font = `bold ${isPortrait ? 14 : 16}px monospace`
+      ctx.fillText(isTouchDevice ? 'QUIT TO MENU' : 'QUIT TO MENU (Q)', canvas.width / 2, qBtnY + qBtnH / 2 + 5)
+
+      // Confirmation modal
+      if (confirmingQuit) {
+        ctx.fillStyle = 'rgba(0,0,0,0.7)'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        const mW = isPortrait ? 260 : 320
+        const mH = isPortrait ? 150 : 160
+        const mX = canvas.width / 2 - mW / 2
+        const mY = canvas.height / 2 - mH / 2
+        ctx.fillStyle = 'rgba(30,30,50,0.95)'
+        ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 12); ctx.fill()
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)'; ctx.lineWidth = 2
+        ctx.beginPath(); ctx.roundRect(mX, mY, mW, mH, 12); ctx.stroke()
+        ctx.fillStyle = '#ffffff'; ctx.font = `bold ${isPortrait ? 16 : 20}px monospace`
+        ctx.fillText('QUIT TO MENU?', canvas.width / 2, mY + 45)
+        ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
+        ctx.fillText('Progress will be lost', canvas.width / 2, mY + 70)
+        // Yes / No buttons
+        const btnW = 90; const btnH = 36; const gap = 20
+        const yesX = canvas.width / 2 - btnW - gap / 2; const noX = canvas.width / 2 + gap / 2
+        const btnY = mY + mH - 55
+        ctx.fillStyle = 'rgba(180,60,60,0.8)'
+        ctx.beginPath(); ctx.roundRect(yesX, btnY, btnW, btnH, 6); ctx.fill()
+        ctx.fillStyle = '#ffffff'; ctx.font = `bold ${isPortrait ? 14 : 16}px monospace`
+        ctx.fillText('YES', yesX + btnW / 2, btnY + btnH / 2 + 5)
+        ctx.fillStyle = 'rgba(60,120,60,0.8)'
+        ctx.beginPath(); ctx.roundRect(noX, btnY, btnW, btnH, 6); ctx.fill()
+        ctx.fillStyle = '#ffffff'
+        ctx.fillText('NO', noX + btnW / 2, btnY + btnH / 2 + 5)
+      }
     }
   } else if (state === 'dialogue') {
     drawDialogue()
