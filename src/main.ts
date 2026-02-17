@@ -871,6 +871,7 @@ canvas.addEventListener('touchstart', e => {
       paused = !paused; confirmingQuit = false; return
     }
   }
+  if (paused) return // Don't process gameplay touches while paused
   for (let i = 0; i < e.changedTouches.length; i++) {
     const t = e.changedTouches[i]
     const hp = polePos()
@@ -962,7 +963,7 @@ function handlePauseMenuClick(cx: number, cy: number): boolean {
   const qBtnW = isPortrait ? 180 : 220
   const qBtnH = isPortrait ? 36 : 40
   const qBtnX = canvas.width / 2 - qBtnW / 2
-  const qBtnY = canvas.height / 2 + 95
+  const qBtnY = canvas.height / 2 + 105
 
   if (confirmingQuit) {
     const mW = isPortrait ? 260 : 320
@@ -981,6 +982,16 @@ function handlePauseMenuClick(cx: number, cy: number): boolean {
       return true
     }
     return true // consume click when modal is open
+  }
+
+  // Music toggle button
+  const musBtnW = isPortrait ? 180 : 220
+  const musBtnH = isPortrait ? 34 : 38
+  const musBtnX = canvas.width / 2 - musBtnW / 2
+  const musBtnY = canvas.height / 2 + 52
+  if (cx >= musBtnX && cx <= musBtnX + musBtnW && cy >= musBtnY && cy <= musBtnY + musBtnH) {
+    toggleMusicMute()
+    return true
   }
 
   if (cx >= qBtnX && cx <= qBtnX + qBtnW && cy >= qBtnY && cy <= qBtnY + qBtnH) {
@@ -3349,15 +3360,25 @@ function draw() {
       ctx.fillText('PAUSED', canvas.width / 2, canvas.height / 2)
       ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = `${isPortrait ? 14 : 18}px monospace`
       ctx.fillText(isTouchDevice ? 'TAP ▶ TO RESUME' : 'PRESS P OR ESC', canvas.width / 2, canvas.height / 2 + 40)
-      // Mute toggle in pause menu
-      ctx.fillStyle = '#ffffff'; ctx.font = `${isPortrait ? 12 : 14}px monospace`
-      ctx.fillText(`MUSIC: ${musicMuted ? 'OFF' : 'ON'}  (press M)`, canvas.width / 2, canvas.height / 2 + 70)
+      // Mute toggle button in pause menu
+      const musFontSize = isPortrait ? 14 : 16
+      const musText = `🔊 MUSIC: ${musicMuted ? 'OFF' : 'ON'}`
+      ctx.font = `${musFontSize}px monospace`
+      const musBtnW = isPortrait ? 180 : 220
+      const musBtnH = isPortrait ? 34 : 38
+      const musBtnX = canvas.width / 2 - musBtnW / 2
+      const musBtnY = canvas.height / 2 + 52
+      ctx.fillStyle = 'rgba(255,255,255,0.15)'
+      ctx.beginPath(); ctx.roundRect(musBtnX, musBtnY, musBtnW, musBtnH, 8); ctx.fill()
+      ctx.fillStyle = '#ffffff'; ctx.textBaseline = 'middle'
+      ctx.fillText(musText, canvas.width / 2, musBtnY + musBtnH / 2)
+      ctx.textBaseline = 'alphabetic'
 
       // Quit to Menu button
       const qBtnW = isPortrait ? 180 : 220
       const qBtnH = isPortrait ? 36 : 40
       const qBtnX = canvas.width / 2 - qBtnW / 2
-      const qBtnY = canvas.height / 2 + 95
+      const qBtnY = canvas.height / 2 + 105
       ctx.fillStyle = 'rgba(180,60,60,0.7)'
       ctx.beginPath(); ctx.roundRect(qBtnX, qBtnY, qBtnW, qBtnH, 8); ctx.fill()
       ctx.strokeStyle = 'rgba(255,255,255,0.5)'; ctx.lineWidth = 1
