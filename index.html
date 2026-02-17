@@ -6,6 +6,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no, minimum-scale=1, maximum-scale=1">
     <title>Sushi Bros</title>
 
+    <!-- SharedArrayBuffer polyfill for environments without COOP/COEP headers -->
+    <script>if(typeof SharedArrayBuffer==='undefined'){window.SharedArrayBuffer=ArrayBuffer;}</script>
     <!-- Load custom style sheet -->
     <link rel="stylesheet" type="text/css" href="theme/love.css">
   </head>
