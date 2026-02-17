@@ -531,7 +531,7 @@ const LEVEL_CONFIGS: LevelConfig[] = [
       if (worldY < shoreEdge) return 'water'
       return 'sand'
     },
-    enemyWeights: [0.55, 0.4, 0.05],
+    enemyWeights: [0.55, 0.45, 0],
     bgColor: '#0a1a3a',
     spawnInterval: [140, 220],
     enemyHpScale: 0.8,
@@ -1003,11 +1003,12 @@ function spawnEnemiesAhead() {
     for (let c = 0; c < count; c++) {
       const terrainAtSpawn = getTerrainAt(nextEnemyWorldY)
       const isWaterSpawn = terrainAtSpawn === 'water'
-      // On water: only crabs and seagulls (no fisherman)
-      const types: EnemyType[] = isWaterSpawn ? ['crab', 'seagull'] : ['crab', 'seagull', 'fisherman']
+      // On water or level 1: only crabs and seagulls (no fisherman)
+      const noFisherman = isWaterSpawn || currentLevel === 0
+      const types: EnemyType[] = noFisherman ? ['crab', 'seagull'] : ['crab', 'seagull', 'fisherman']
       const diff = Math.min(nextEnemyWorldY / 5000, 1)
       let weights: number[]
-      if (isWaterSpawn) {
+      if (noFisherman) {
         weights = [0.5, 0.5]
       } else {
         weights = lvlCfg ? [
