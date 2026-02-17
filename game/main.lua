@@ -6,7 +6,8 @@ local Levels = require("levels")
 local BossMod = require("boss")
 
 -- ─── Globals ───
-local W, H = love.graphics.getDimensions()
+local W, H = 800, 600
+pcall(function() W, H = love.graphics.getDimensions() end)
 local isPortrait = H > W
 
 
@@ -106,7 +107,16 @@ local POWERUP_LABELS = {speed="S", triple="T", shield="D", life="+"}
 -- Boss
 
 -- Input
-local isTouchDevice = love.system.getOS() == "Android" or love.system.getOS() == "iOS" or os.getenv("LOVE_WEB") ~= nil
+local isTouchDevice = false
+pcall(function()
+    isTouchDevice = love.system.getOS() == "Android" or love.system.getOS() == "iOS"
+end)
+-- In love.js, always enable touch as fallback
+if not isTouchDevice then
+    pcall(function()
+        isTouchDevice = os.getenv("LOVE_WEB") ~= nil
+    end)
+end
 
 -- Touch controls
 local DPAD_R = 55
